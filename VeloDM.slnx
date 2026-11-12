@@ -1,0 +1,9 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/VeloDM.App/VeloDM.App.csproj" />
+    <Project Path="src/VeloDM.Core/VeloDM.Core.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/VeloDM.Tests/VeloDM.Tests.csproj" />
+  </Folder>
+</Solution>

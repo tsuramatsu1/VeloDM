@@ -1,0 +1,76 @@
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
+  <!-- UpgradeCode must never change: it is how a newer installer finds and replaces an older install. -->
+  <Package Name="VeloDM" Manufacturer="VeloDM" Version="$(var.ProductVersion)"
+           UpgradeCode="8EE48080-D2FB-4CDA-B512-969AB8DA7262" Scope="perMachine" Compressed="yes">
+
+    <MajorUpgrade DowngradeErrorMessage="A newer version of VeloDM is already installed." />
+    <MediaTemplate EmbedCab="yes" CompressionLevel="high" />
+
+    <Icon Id="VeloDM.ico" SourceFile="..\src\VeloDM.App\Assets\VeloDM.ico" />
+    <Property Id="ARPPRODUCTICON" Value="VeloDM.ico" />
+    <Property Id="ARPNOMODIFY" Value="1" />
+
+    <StandardDirectory Id="ProgramFiles64Folder">
+      <Directory Id="INSTALLFOLDER" Name="VeloDM" />
+    </StandardDirectory>
+
+    <Feature Id="Main" Title="VeloDM">
+      <!-- Everything dotnet publish produced, including the browser extension folder. -->
+      <Files Directory="INSTALLFOLDER" Include="$(var.PublishDir)\**" />
+      <ComponentRef Id="StartMenuShortcut" />
+      <ComponentRef Id="DesktopShortcut" />
+      <ComponentRef Id="TorrentAssociations" />
+    </Feature>
+
+    <!-- Makes VeloDM the handler for magnet: links and .torrent files for all users. A per-user
+         choice (HKCU, e.g. made by another torrent client) still takes priority over this. -->
+    <Component Id="TorrentAssociations" Directory="INSTALLFOLDER" Guid="*">
+      <RegistryKey Root="HKLM" Key="Software\Classes\magnet">
+        <RegistryValue Type="string" Value="URL:Magnet link" KeyPath="yes" />
+        <RegistryValue Name="URL Protocol" Type="string" Value="" />
+        <RegistryValue Key="DefaultIcon" Type="string" Value="&quot;[INSTALLFOLDER]VeloDM.exe&quot;,0" />
+        <RegistryValue Key="shell\open\command" Type="string" Value="&quot;[INSTALLFOLDER]VeloDM.exe&quot; &quot;%1&quot;" />
+      </RegistryKey>
+      <RegistryKey Root="HKLM" Key="Software\Classes\VeloDM.Torrent">
+        <RegistryValue Type="string" Value="Torrent file" />
+        <RegistryValue Key="DefaultIcon" Type="string" Value="&quot;[INSTALLFOLDER]VeloDM.exe&quot;,0" />
+        <RegistryValue Key="shell\open\command" Type="string" Value="&quot;[INSTALLFOLDER]VeloDM.exe&quot; &quot;%1&quot;" />
+      </RegistryKey>
+      <RegistryKey Root="HKLM" Key="Software\Classes\.torrent">
+        <RegistryValue Type="string" Value="VeloDM.Torrent" />
+        <RegistryValue Name="Content Type" Type="string" Value="application/x-bittorrent" />
+        <RegistryValue Key="OpenWithProgids" Name="VeloDM.Torrent" Type="string" Value="" />
+      </RegistryKey>
+    </Component>
+
+    <StandardDirectory Id="ProgramMenuFolder">
+      <Component Id="StartMenuShortcut" Guid="*">
+        <Shortcut Id="StartMenuShortcut" Name="VeloDM" Description="Download manager"
+                  Target="[INSTALLFOLDER]VeloDM.exe" WorkingDirectory="INSTALLFOLDER" Icon="VeloDM.ico" />
+        <RegistryValue Root="HKCU" Key="Software\VeloDM\Installer" Name="StartMenuShortcut" Type="integer" Value="1" KeyPath="yes" />
+      </Component>
+    </StandardDirectory>
+
+    <StandardDirectory Id="DesktopFolder">
+      <Component Id="DesktopShortcut" Guid="*">
+        <Shortcut Id="DesktopShortcut" Name="VeloDM" Description="Download manager"
+                  Target="[INSTALLFOLDER]VeloDM.exe" WorkingDirectory="INSTALLFOLDER" Icon="VeloDM.ico" />
+        <RegistryValue Root="HKCU" Key="Software\VeloDM\Installer" Name="DesktopShortcut" Type="integer" Value="1" KeyPath="yes" />
+      </Component>
+    </StandardDirectory>
+
+    <!-- Start VeloDM, on its browser-extension setup window, after a first, interactive install (not on silent installs, repairs or uninstalls).
+         Immediate + impersonated, so the app runs as the user, not elevated. -->
+    <CustomAction Id="LaunchApp" Directory="INSTALLFOLDER" ExeCommand="&quot;[INSTALLFOLDER]VeloDM.exe&quot; --setup-extension"
+                  Execute="immediate" Impersonate="yes" Return="asyncNoWait" />
+    <!-- The "start when I sign in" option (Options → General) writes this Run value from the app.
+         Remove it on a real uninstall, not on an upgrade, so no dead startup entry is left behind. -->
+    <CustomAction Id="RemoveStartupEntry" Directory="INSTALLFOLDER"
+                  ExeCommand="&quot;[System64Folder]reg.exe&quot; delete HKCU\Software\Microsoft\Windows\CurrentVersion\Run /v VeloDM /f"
+                  Execute="immediate" Impersonate="yes" Return="ignore" />
+    <InstallExecuteSequence>
+      <Custom Action="RemoveStartupEntry" Before="InstallFinalize" Condition="REMOVE=&quot;ALL&quot; AND NOT UPGRADINGPRODUCTCODE" />
+      <Custom Action="LaunchApp" After="InstallFinalize" Condition="NOT Installed AND NOT WIX_UPGRADE_DETECTED AND UILevel &gt;= 3" />
+    </InstallExecuteSequence>
+  </Package>
+</Wix>

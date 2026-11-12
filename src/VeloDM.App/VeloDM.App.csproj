@@ -1,0 +1,30 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <Nullable>enable</Nullable>
+    <!-- WPF + WinForms (tray icon) implicit usings collide, so imports are explicit. -->
+    <ImplicitUsings>disable</ImplicitUsings>
+    <UseWPF>true</UseWPF>
+    <UseWindowsForms>true</UseWindowsForms>
+    <AssemblyName>VeloDM</AssemblyName>
+    <RootNamespace>VeloDM.App</RootNamespace>
+    <Version>1.2.0</Version>
+    <Product>VeloDM</Product>
+    <ApplicationIcon>Assets\VeloDM.ico</ApplicationIcon>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Resource Include="Assets\VeloDM.ico" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\VeloDM.Core\VeloDM.Core.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Include="..\..\extension\**\*" LinkBase="extension" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+</Project>
