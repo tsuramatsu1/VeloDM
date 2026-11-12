@@ -114,8 +114,17 @@ async function sendStreamToApp(tab, frameUrl, title) {
 // Firefox has no onDeterminingFilename; its onCreated already carries the target file name.
 if (chrome.downloads.onDeterminingFilename) {
   chrome.downloads.onDeterminingFilename.addListener((item, suggest) => {
-    suggest(); // keep the browser's own file name; we only want to look at it
-    offerToApp(item);
+    // The browser holds the download at this point until suggest() is called, and only then
+    // goes on to its own "Save as" window (when it is set to ask where to save each file).
+    // So VeloDM is asked first: a download it takes is cancelled without that window ever
+    // appearing. Calling suggest() with nothing keeps the browser's own file name.
+    offerToApp(item).then(
+      (taken) => {
+        if (!taken) suggest();
+      },
+      () => suggest(),
+    );
+    return true; // suggest() is called later
   });
 } else {
   chrome.downloads.onCreated.addListener((item) => {
@@ -123,13 +132,14 @@ if (chrome.downloads.onDeterminingFilename) {
   });
 }
 
+// Resolves to true when VeloDM took the download (and the browser's copy was cancelled).
 async function offerToApp(item) {
   const url = item.finalUrl || item.url;
-  if (!/^https?:/i.test(url)) return; // blob:, data:, file: stay in the browser
-  if (passThrough.delete(url)) return;
+  if (!/^https?:/i.test(url)) return false; // blob:, data:, file: stay in the browser
+  if (passThrough.delete(url)) return false;
 
   const { enabled } = await settings();
-  if (!enabled) return;
+  if (!enabled) return false;
 
   // Pause first so the browser does not race ahead while we ask the app.
   await chrome.downloads.pause(item.id).catch(() => {});
@@ -151,6 +161,7 @@ async function offerToApp(item) {
   } else {
     await chrome.downloads.resume(item.id).catch(() => {});
   }
+  return taken;
 }
 
 function createMenus() {
