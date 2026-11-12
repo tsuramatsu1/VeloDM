@@ -128,7 +128,7 @@ internal sealed partial class StreamTask : IDownloadJob
         }
         catch (Exception ex)
         {
-            Item.ErrorMessage = ex.Message;
+            Item.ErrorMessage = ex.Message + StaleToolsHint();
             Item.Status = DownloadStatus.Error;
         }
         finally
@@ -142,6 +142,14 @@ internal sealed partial class StreamTask : IDownloadJob
             _cts.Dispose();
         }
     }
+
+    internal static readonly TimeSpan StaleAfter = TimeSpan.FromDays(14);
+
+    /// <summary>Video sites change often, so an old yt-dlp is the usual reason a video stops downloading.</summary>
+    private string StaleToolsHint() =>
+        VideoTools.ManagedToolAge(_manager.DataDirectory) is { } age && age > StaleAfter
+            ? $" The video tools are {age.Days} days old; updating them often fixes this (open the download and choose Update video tools and retry)."
+            : "";
 
     private void ResetProgress()
     {
@@ -168,12 +176,10 @@ internal sealed partial class StreamTask : IDownloadJob
         };
         foreach (var argument in BuildArguments(Item, _manager.Settings, tools, address, isManifest))
             start.ArgumentList.Add(argument);
-        start.Environment["PYTHONIOENCODING"] = "utf-8";
-        start.Environment["PYTHONUTF8"] = "1";
-        // The proxy goes through the environment so its password never appears on a command line.
-        if (HttpEngine.ProxyUrlForTools(_manager.Settings) is { Length: > 0 } proxy)
-            start.Environment["HTTP_PROXY"] = start.Environment["HTTPS_PROXY"] = start.Environment["ALL_PROXY"] = proxy;
+        ApplyToolEnvironment(start, _manager.Settings);
 
+        Log.Info($"Video: yt-dlp started for {Log.Address(address)}{(isManifest ? " (playlist fallback)" : "")}, " +
+                 $"JavaScript runtime: {tools.JsRuntime?.Split(':')[0] ?? "none"}");
         using var process = new Process { StartInfo = start };
         process.OutputDataReceived += (_, e) => { if (e.Data is { } line) OnOutput(line); };
         process.ErrorDataReceived += (_, e) => { if (e.Data is { } line) OnError(line); };
@@ -194,6 +200,7 @@ internal sealed partial class StreamTask : IDownloadJob
             throw;
         }
         process.WaitForExit(); // lets the last output lines be delivered
+        Log.Info($"Video: yt-dlp finished with exit code {process.ExitCode} for {Log.Address(address)}");
         return process.ExitCode;
     }
 
@@ -214,6 +221,8 @@ internal sealed partial class StreamTask : IDownloadJob
             "--no-playlist", "--no-mtime", "--windows-filenames", "--no-simulate", "--progress", "--newline",
             "--color", "no_color", "--encoding", "utf-8",
             "--ffmpeg-location", tools.FfmpegDirectory,
+            // HLS and DASH streams are many small pieces; fetched one at a time they are far slower than the line allows.
+            "--concurrent-fragments", Math.Clamp(settings.DefaultConnections, 1, 16).ToString(CultureInfo.InvariantCulture),
             "-f", format,
             "--merge-output-format", "mp4",
             // "%" starts a field in an output template, so literal ones in the folder are doubled.
@@ -224,14 +233,13 @@ internal sealed partial class StreamTask : IDownloadJob
             "--print", $"after_move:{FileTag}|%(filepath)s",
         };
 
-        if (settings.ProxyMode == ProxyMode.None) args.AddRange(["--proxy", ""]);
+        AddConnectionArguments(args, tools, settings, item.Cookies);
 
         long limit = settings.SpeedLimitBytes;
         long own = item.SpeedLimitKBps * 1024L;
         if (own > 0 && (limit <= 0 || own < limit)) limit = own;
         if (limit > 0) args.AddRange(["--limit-rate", limit.ToString(CultureInfo.InvariantCulture)]);
 
-        if (!string.IsNullOrWhiteSpace(item.Cookies)) args.AddRange(["--add-headers", "Cookie:" + item.Cookies]);
         if (isManifest)
         {
             // A bare playlist is fetched like the page's player would fetch it.
@@ -242,6 +250,23 @@ internal sealed partial class StreamTask : IDownloadJob
         args.Add("--");
         args.Add(address);
         return args;
+    }
+
+    /// <summary>What every yt-dlp run needs to reach the site the way the browser does.</summary>
+    internal static void AddConnectionArguments(List<string> args, VideoToolPaths tools, AppSettings settings, string? cookies)
+    {
+        if (tools.JsRuntime is not null) args.AddRange(["--js-runtimes", tools.JsRuntime]);
+        if (settings.ProxyMode == ProxyMode.None) args.AddRange(["--proxy", ""]);
+        if (!string.IsNullOrWhiteSpace(cookies)) args.AddRange(["--add-headers", "Cookie:" + cookies]);
+    }
+
+    internal static void ApplyToolEnvironment(ProcessStartInfo start, AppSettings settings)
+    {
+        start.Environment["PYTHONIOENCODING"] = "utf-8";
+        start.Environment["PYTHONUTF8"] = "1";
+        // The proxy goes through the environment so its password never appears on a command line.
+        if (HttpEngine.ProxyUrlForTools(settings) is { Length: > 0 } proxy)
+            start.Environment["HTTP_PROXY"] = start.Environment["HTTPS_PROXY"] = start.Environment["ALL_PROXY"] = proxy;
     }
 
     private void OnOutput(string line)
@@ -292,6 +317,8 @@ internal sealed partial class StreamTask : IDownloadJob
     {
         if (line.StartsWith("ERROR:", StringComparison.OrdinalIgnoreCase))
             _lastError = line[6..].Trim();
+        // yt-dlp's own warnings and errors are the best clue when a site stops working.
+        if (line.Length > 0) Log.Warn("Video: yt-dlp: " + line);
     }
 
     private static string? TagValue(string line, string tag) =>

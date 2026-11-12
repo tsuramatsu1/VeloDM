@@ -217,6 +217,27 @@ public sealed class NewFeatureTests : IDisposable
         Assert.False(HttpEngine.IsValidProxyAddress("ftp://proxy.local"));
     }
 
+    // ---- settings ------------------------------------------------------------------------
+
+    [Fact]
+    public void Download_dialog_is_on_by_default_and_older_settings_are_switched_once()
+    {
+        var path = Path.Combine(_dir, "settings.json");
+        Assert.True(new AppSettings().ShowDialogForBrowserDownloads);
+
+        // Written by a version before 1.3.2, where browser downloads started without asking.
+        File.WriteAllText(path, """{ "ShowDialogForBrowserDownloads": false, "DefaultConnections": 12 }""");
+        var upgraded = AppSettings.Load(path);
+        Assert.True(upgraded.ShowDialogForBrowserDownloads);
+        Assert.Equal(12, upgraded.DefaultConnections);
+
+        // Turning it off afterwards is the user's choice and stays.
+        upgraded.ShowDialogForBrowserDownloads = false;
+        upgraded.Save(path);
+        Assert.False(AppSettings.Load(path).ShowDialogForBrowserDownloads);
+        Assert.False(AppSettings.Load(path).Clone().ShowDialogForBrowserDownloads);
+    }
+
     // ---- checksums -----------------------------------------------------------------------
 
     [Fact]

@@ -14,7 +14,7 @@ Each library remains under its own licence and copyright; the links above lead t
 
 ## Programs VeloDM can download and run, but does not include
 
-Streamed-video downloads use two separate programs. They are not part of VeloDM and are not in
+Streamed-video downloads use separate programs. They are not part of VeloDM and are not in
 its installer: VeloDM downloads them from their official release pages only when you ask it to
 (Options → Video).
 
@@ -22,6 +22,7 @@ its installer: VeloDM downloads them from their official release pages only when
 |---|---|---|
 | [yt-dlp](https://github.com/yt-dlp/yt-dlp) | Reading video pages and downloading streams | The Unlicense (the Windows executable bundles components under other licences; see its repository) |
 | [FFmpeg](https://ffmpeg.org) (builds from [yt-dlp/FFmpeg-Builds](https://github.com/yt-dlp/FFmpeg-Builds)) | Joining picture and sound | GPL v3 for the build VeloDM downloads |
+| [Deno](https://github.com/denoland/deno) | Running the scripts YouTube requires, for yt-dlp | MIT |
 
 You are responsible for using these tools, and the videos you download with them, in line with
 the terms of the sites involved and the law where you live.

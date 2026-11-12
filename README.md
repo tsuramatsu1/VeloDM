@@ -9,8 +9,9 @@ extension that hands downloads and videos to the app.
 Built with .NET 10 and WPF. Third-party libraries:
 [MonoTorrent](https://github.com/alanmcgovern/monotorrent) (BitTorrent) and
 [SharpCompress](https://github.com/adamhathcock/sharpcompress) (archive extraction), both MIT.
-Streamed video uses [yt-dlp](https://github.com/yt-dlp/yt-dlp) and [FFmpeg](https://ffmpeg.org),
-separate programs that VeloDM downloads on request. See `THIRD-PARTY-NOTICES.md`.
+Streamed video uses [yt-dlp](https://github.com/yt-dlp/yt-dlp), [FFmpeg](https://ffmpeg.org) and
+[Deno](https://deno.com), separate programs that VeloDM downloads on request. See
+`THIRD-PARTY-NOTICES.md`.
 
 ## Features
 
@@ -28,6 +29,7 @@ separate programs that VeloDM downloads on request. See `THIRD-PARTY-NOTICES.md`
 | **Proxy** | Options → Connection: use the Windows setting, no proxy, or your own HTTP/HTTPS/SOCKS5 proxy with optional login. |
 | **Update check** | Looks for a newer release at startup and from Help → Check for updates. |
 | **Dark theme** | Options → General → Appearance: Light, Dark, or the same as Windows. |
+| **Log file** | `%LocalAppData%\VeloDM\logs\velodm.log` records what VeloDM did and why a download failed (Help → Open log folder). See [Troubleshooting](#troubleshooting). |
 | **Categories** | Compressed, Documents, Music, Programs, Video and General, each saved to its own subfolder of your Downloads folder by default. |
 | **Clipboard monitoring** | Copying a link to a captured file type opens the Add Download dialog. |
 | **Browser integration** | The extension sends downloads, plus cookies, referrer and user agent so logged-in and protected links work, to the app on `localhost:9615`. It also adds "Download with VeloDM" to the right-click menu and a download pill on playing videos. |
@@ -77,15 +79,23 @@ Command-line options:
 ## Streamed video
 
 Video sites rarely serve a video as one file: the player fetches it in small pieces (HLS or DASH),
-often with picture and sound separate. VeloDM hands these to two free, open-source programs:
-**yt-dlp** downloads the stream and **FFmpeg** joins picture and sound into one `.mp4`.
+often with picture and sound separate. VeloDM hands these to free, open-source programs:
+**yt-dlp** downloads the stream, **FFmpeg** joins picture and sound into one `.mp4`, and **Deno**
+runs the scripts YouTube requires (a Node.js 22 or later that is already installed is used if Deno
+is missing; without either, YouTube still works but may offer fewer qualities).
 
 They are not part of VeloDM. The first time you download a streamed video, VeloDM asks, then
-downloads them from their official GitHub release pages (about 150 MB) into
+downloads them from their official GitHub release pages (about 250 MB) into
 `%LocalAppData%\VeloDM\tools`; the yt-dlp download is checked against its published SHA-256.
 **Options → Video** shows whether they are installed and updates them. If you already have
-`yt-dlp.exe` and `ffmpeg.exe` on your `PATH`, those are used instead. Video sites change often, so
-when a site stops working, **Update video tools** is the first thing to try.
+`yt-dlp.exe` and `ffmpeg.exe` on your `PATH`, those are used instead.
+
+Video sites change often, so an old yt-dlp is the usual reason a video stops downloading. When a
+video fails, its progress window offers **Update video tools and retry**, and the error says so
+when the tools are more than two weeks old.
+
+Streams are fetched several pieces at a time (the **Connections per download** setting, up to 16),
+which makes HLS and DASH downloads many times faster than one piece at a time.
 
 Ways to start a video download:
 
@@ -175,10 +185,12 @@ accepts it only if the file type is in **Options → Browser → Capture these f
 or when the app isn't running, the browser download simply resumes. Right-click → **Download with
 VeloDM** always sends the link, whatever its type.
 
-A captured download starts at once and is saved by type: `Downloads\Compressed`, `Downloads\Video`,
-`Downloads\Programs` and so on (change the base folder in **Options → General**). To be asked for
-the name and folder each time instead, turn on **Options → Browser → Ask before starting a download
-captured from the browser**.
+A captured download first shows the download dialog, with the name and the folder for its type
+already filled in (`Downloads\Compressed`, `Downloads\Video`, `Downloads\Programs` and so on; change
+the base folder in **Options → General**). Change them if you like, then choose **Start Download**
+or **Download Later**. For a video, the dialog reads the page and fills in the video's title. To
+start browser downloads straight away without the dialog, turn off **Options → Browser → Show the
+download dialog for downloads from the browser**.
 
 **Video pill:** when a video or audio file plays on a page, a small **Download this video** pill
 appears at its top-right corner. Clicking it sends the file to VeloDM, named after the page title.
@@ -187,7 +199,17 @@ directly. On **X (Twitter) and Facebook**, which stream their videos in chunks, 
 for each post also lists ordinary `.mp4` versions; the extension reads that list and offers the
 best-quality one. On every other streaming site (YouTube and the like) the pill sends the page
 address and VeloDM downloads the video with its video tools: see [Streamed video](#streamed-video).
+This is also how **Facebook reels** are downloaded: the pill appears on a reel, a watch page or a
+single post (pages whose address names one video), not in the news feed.
 No pill is shown on copy-protected (DRM) video. The extension popup has a switch to turn the pill off.
+
+**After upgrading VeloDM, reload the extension.** A browser keeps running the copy of an unpacked
+extension it loaded earlier, so new extension features are missing until you open the extensions
+page and press the reload button on VeloDM Integration (or restart the browser). VeloDM shows a
+notification when the extension that calls it is older than the one it ships.
+
+**Windows in front:** a download started from the browser opens its progress window (or the Add
+dialog) in front of the browser, without taking the keyboard away from the page.
 
 **Magnet links:** clicking a magnet link on a page sends it straight to VeloDM. If the app is not
 running, the link is followed normally.
@@ -210,6 +232,20 @@ Web pages can only send that header after a CORS preflight, which the app never 
 page cannot queue a download. Requests that carry an `Origin` header are accepted only from
 `chrome-extension://` or `moz-extension://` origins.
 
+## Troubleshooting
+
+**Help → Open log folder** opens `%LocalAppData%\VeloDM\logs`. `velodm.log` records, with times:
+
+- every download the browser offered and whether VeloDM took it or left it to the browser, and why;
+- downloads added, finished, stopped and failed, with the error;
+- failed connections during a download;
+- for video: when yt-dlp was started, its warnings and errors, and how it ended;
+- after-download results, update checks, the browser extension's version, and unexpected errors.
+
+Addresses are written without their query string, and cookies and passwords are never written,
+because download links often carry access tokens. The log is limited to 2 MB plus one older file
+(`velodm.1.log`).
+
 ## Project layout
 
 ```
@@ -217,7 +253,7 @@ src/VeloDM.Core     Engine: DownloadTask (HTTP segmentation), TorrentTask + Torr
                     (BitTorrent via MonoTorrent), StreamTask + VideoTools (streamed video via
                     yt-dlp), DownloadManager (queue, scheduler, persistence), HttpEngine (probe,
                     requests, proxy), PostProcessor (extract, virus scan), Checksums,
-                    UpdateChecker, SpeedLimiter, settings
+                    UpdateChecker, Log, SpeedLimiter, settings
 src/VeloDM.App      WPF UI: main window, Add/Progress/Options/Batch dialogs, refresh-address,
                     checksum and video-tools dialogs, themes, tray icon, clipboard monitor,
                     BrowserBridge (localhost endpoint)
@@ -238,9 +274,11 @@ to their destination as `<name>.vdmpart` until they complete.
 ## Known limitations
 
 - No FTP.
-- Streamed video depends on yt-dlp and FFmpeg, which VeloDM downloads on request but does not
-  include. DRM-protected video cannot be downloaded. A video download shows no segment map, and a
-  changed speed limit applies to it only after a pause and resume.
+- Streamed video depends on yt-dlp, FFmpeg and Deno, which VeloDM downloads on request but does
+  not include. DRM-protected video cannot be downloaded. A video download shows no segment map, and
+  a changed speed limit applies to it only after a pause and resume.
+- The video pill on Facebook reels relies on yt-dlp recognising the reel's address; it has not
+  been verified on Facebook itself.
 - Magnet links that list only WebTorrent (`wss://`) trackers rely on DHT to find peers.
 - The speed limiter covers HTTP, torrents and video separately: each is held to the limit, so
   together they can use more than the limit.

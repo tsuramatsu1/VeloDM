@@ -6,7 +6,7 @@ using VeloDM.Core;
 
 namespace VeloDM.App;
 
-/// <summary>Downloads yt-dlp and FFmpeg into VeloDM's data folder, with progress.</summary>
+/// <summary>Downloads yt-dlp, FFmpeg and Deno into VeloDM's data folder, with progress.</summary>
 public partial class VideoToolsWindow : Window
 {
     private readonly DownloadManager _manager;
@@ -28,12 +28,13 @@ public partial class VideoToolsWindow : Window
     public static bool EnsureInstalled(Window? owner, DownloadManager manager)
     {
         if (manager.LocateVideoTools() is not null) return true;
-        var answer = MessageBox.Show(owner ?? Application.Current.MainWindow,
-            "Streamed video (YouTube and most other video sites) is downloaded with two free, open-source helper " +
+        var answer = OnTop.Ask(owner,
+            "Streamed video (YouTube and most other video sites) is downloaded with free, open-source helper " +
             "programs that are not part of VeloDM:\n\n" +
             "  •  yt-dlp — reads the video page and downloads the stream\n" +
-            "  •  FFmpeg — joins the picture and the sound into one file\n\n" +
-            "VeloDM can download them now from their official GitHub release pages (about 150 MB) into its data folder.\n\n" +
+            "  •  FFmpeg — joins the picture and the sound into one file\n" +
+            "  •  Deno — runs the scripts YouTube requires\n\n" +
+            "VeloDM can download them now from their official GitHub release pages (about 250 MB) into its data folder.\n\n" +
             "Download the video tools?",
             "Video tools needed", MessageBoxButton.YesNo, MessageBoxImage.Question);
         return answer == MessageBoxResult.Yes && Install(owner, manager);
@@ -42,8 +43,17 @@ public partial class VideoToolsWindow : Window
     public static bool Install(Window? owner, DownloadManager manager)
     {
         var window = new VideoToolsWindow(manager);
-        if (owner is { IsVisible: true }) window.Owner = owner;
+        if (owner is { IsVisible: true, WindowState: not WindowState.Minimized }) window.Owner = owner;
         else window.WindowStartupLocation = WindowStartupLocation.CenterScreen;
+        if (owner is not { IsActive: true })
+        {
+            window.Topmost = true;
+            window.Loaded += (_, _) =>
+            {
+                window.Activate();
+                window.Topmost = false;
+            };
+        }
         return window.ShowDialog() == true;
     }
 
@@ -67,7 +77,7 @@ public partial class VideoToolsWindow : Window
         {
             MessageBox.Show(this,
                 "The video tools could not be downloaded:\n\n" + ex.Message +
-                "\n\nYou can also put yt-dlp.exe and ffmpeg.exe in this folder yourself:\n" +
+                "\n\nYou can also put yt-dlp.exe, ffmpeg.exe and deno.exe in this folder yourself:\n" +
                 VideoTools.DirectoryFor(_manager.DataDirectory),
                 "Video tools", MessageBoxButton.OK, MessageBoxImage.Warning);
             DialogResult = false;

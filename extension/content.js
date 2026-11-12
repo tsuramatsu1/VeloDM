@@ -99,7 +99,8 @@
       const id = ((el.poster || "").match(/\/(\d{8,})\//) || [])[1];
       if (id && sniffed.has(id)) return sniffed.get(id).url;
     }
-    if (lastKey && sniffed.has(lastKey)) return sniffed.get(lastKey).url;
+    if (lastKey) return sniffed.has(lastKey) ? sniffed.get(lastKey).url : null;
+    // Nothing has been requested yet, so a single known video can only be the one on screen.
     const urls = new Set([...sniffed.values()].map((v) => v.url));
     return site === "fb" && urls.size === 1 ? [...urls][0] : null;
   }
@@ -109,13 +110,22 @@
     return candidates.find((u) => /^https?:/i.test(u || "")) || sniffedUrl(el);
   }
 
+  // Whether this page's address identifies one video, so VeloDM's video tools can be pointed at it.
+  // On Facebook and X that is a reel, a watch page or a single post; their feeds are not.
+  function pageNamesTheVideo() {
+    if (site === "fb") return /^\/(reel|reels|watch|share\/[vr]|[^/]+\/videos)(\/|$)/.test(location.pathname);
+    if (site === "x") return /\/status\/\d+/.test(location.pathname);
+    return true;
+  }
+
   // A chunked stream: the player feeds the element from script, so there is no file address to send.
   function isStream(el) {
-    if (el.tagName !== "VIDEO" || el.mediaKeys) return false;
+    if (el.tagName !== "VIDEO" || el.mediaKeys || !pageNamesTheVideo()) return false;
     const src = el.currentSrc || el.src || "";
     if (src && !/^(blob|mediasource):/i.test(src)) return false;
     if (!src && !el.srcObject) return false;
-    return !(el.duration < MIN_STREAM_SECONDS); // unknown and live durations pass
+    // Reels and posts are often only a few seconds long; elsewhere short clips are previews and decoration.
+    return site ? true : !(el.duration < MIN_STREAM_SECONDS); // unknown and live durations pass
   }
 
   function downloadable(el) {
@@ -196,7 +206,8 @@
     const url = mediaUrl(el);
     if (!url && !isStream(el)) return;
     const original = label.textContent;
-    const title = (document.title || "").trim().slice(0, 150);
+    // Facebook and X page titles describe the site, not the video.
+    const title = site ? "" : (document.title || "").trim().slice(0, 150);
     chrome.runtime.sendMessage(
       url
         ? { type: "download", url, referrer: location.href, fileName: fileNameFor(el, url) }

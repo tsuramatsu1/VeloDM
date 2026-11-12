@@ -190,9 +190,7 @@ public partial class AddDownloadWindow : Window
         }
         if (_isVideo)
         {
-            InfoText.Text = "VeloDM will read this page and download the video on it" +
-                            (_manager.LocateVideoTools() is null ? " (the video tools are downloaded first)." : ".") +
-                            "\nLeave Save as empty to name the file after the video's title.";
+            await ProbeVideoAsync(source, cts.Token);
             return;
         }
 
@@ -213,8 +211,7 @@ public partial class AddDownloadWindow : Window
                 SetVideoMode(true);
                 if (!_nameEdited) SetName("");
                 UpdateMode();
-                InfoText.Text = "This address is a web page, not a file, so VeloDM will download the video on it.\n" +
-                                "Untick the box below to save the page itself instead.";
+                await ProbeVideoAsync(source, cts.Token);
                 return;
             }
             if (!_nameEdited) SetName(info.FileName);
@@ -229,6 +226,36 @@ public partial class AddDownloadWindow : Window
         {
             if (!cts.IsCancellationRequested)
                 InfoText.Text = "Could not get file information: " + ex.Message;
+        }
+    }
+
+    private async Task ProbeVideoAsync(string source, CancellationToken ct)
+    {
+        const string nameHint = "\nLeave Save as empty to name the file after the video's title.";
+        if (_manager.LocateVideoTools() is not { } tools)
+        {
+            InfoText.Text = "VeloDM will read this page and download the video on it (the video tools are downloaded first)." + nameHint;
+            return;
+        }
+        InfoText.Text = "Reading the video page…";
+        try
+        {
+            var info = await VideoProbe.GetAsync(tools, _manager.Settings, source, _request?.Cookies, ct);
+            if (ct.IsCancellationRequested) return;
+            if (!_nameEdited) SetName(FileNameHelper.Sanitize(info.Title) + ".mp4");
+            int height = _manager.Settings.StreamMaxHeight;
+            InfoText.Text = $"Video: {info.Title}" +
+                            // Under a minute the tool gives bare seconds ("19"); longer ones read as m:ss.
+                            (info.Duration is null ? "" : $"     Length: {info.Duration}{(info.Duration.Contains(':') ? "" : " seconds")}") +
+                            $"     Quality: {(height > 0 ? $"up to {height}p" : "best available")}";
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or System.ComponentModel.Win32Exception or IOException)
+        {
+            if (!ct.IsCancellationRequested)
+                InfoText.Text = "The video tools could not read this page yet: " + ex.Message + "\nYou can still start the download." + nameHint;
         }
     }
 

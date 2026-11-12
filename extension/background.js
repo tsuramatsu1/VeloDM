@@ -20,7 +20,8 @@ async function callApp(path, body) {
   const { port } = await settings();
   const response = await fetch(`http://localhost:${port}${path}`, {
     method: body ? "POST" : "GET",
-    headers: { "Content-Type": "application/json", "X-VeloDM": "1" },
+    // The header's value tells the app which version of the extension the browser is running.
+    headers: { "Content-Type": "application/json", "X-VeloDM": chrome.runtime.getManifest().version },
     body: body ? JSON.stringify(body) : undefined,
     signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
   });
@@ -97,7 +98,7 @@ async function sendStreamToApp(tab, frameUrl, title) {
   const result = await callApp("/add", {
     url,
     stream: true,
-    title: title || tab.title || "",
+    title: title || "", // empty: VeloDM names the file after the video's own title
     manifestUrl: await playlistFor(tab.id),
     referrer: tab.url || url,
     cookies: await cookieHeader(url),

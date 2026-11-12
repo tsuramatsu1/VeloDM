@@ -5,6 +5,18 @@
 //   address contains "slow"        -> pauses between progress lines so a test can interrupt it
 
 string address = args[^1];
+if (args.Contains("--skip-download"))
+{
+    // Asked what the video is, not to download it.
+    if (address.Contains("unsupported"))
+    {
+        Console.Error.WriteLine("ERROR: Unsupported URL: " + address);
+        return 1;
+    }
+    Console.WriteLine("Fake: Title?");
+    Console.WriteLine(address.Contains("live") ? "NA" : "0:19");
+    return 0;
+}
 string template = args[Array.IndexOf(args, "-o") + 1];
 string output = template.Replace("%(title).150B", "Fake Title").Replace("%(ext)s", "mp4").Replace("%%", "%");
 File.WriteAllLines(output + ".args.txt", args);

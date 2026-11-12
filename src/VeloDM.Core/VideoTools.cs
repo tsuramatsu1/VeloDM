@@ -3,12 +3,17 @@ using System.Security.Cryptography;
 
 namespace VeloDM.Core;
 
-public sealed record VideoToolPaths(string YtDlp, string FfmpegDirectory);
+/// <param name="JsRuntime">
+/// A JavaScript runtime for yt-dlp in its own notation ("deno:C:\…\deno.exe"), or null when none
+/// was found. YouTube needs one; most other sites do not.
+/// </param>
+public sealed record VideoToolPaths(string YtDlp, string FfmpegDirectory, string? JsRuntime = null);
 
 /// <summary>
-/// Streamed video (HLS, DASH, YouTube and similar) is downloaded by two free helper programs,
-/// yt-dlp and FFmpeg. They are not part of VeloDM: the user downloads them once from Options,
-/// into the data folder, from the projects' official release pages.
+/// Streamed video (HLS, DASH, YouTube and similar) is downloaded by free helper programs:
+/// yt-dlp, FFmpeg, and Deno (a JavaScript runtime yt-dlp needs for YouTube). They are not part
+/// of VeloDM: the user downloads them once from Options, into the data folder, from the
+/// projects' official release pages.
 /// </summary>
 public static class VideoTools
 {
@@ -17,6 +22,10 @@ public static class VideoTools
     public const string FfmpegUrl =
         "https://github.com/yt-dlp/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-win64-gpl.zip";
 
+    public const string DenoUrl = "https://github.com/denoland/deno/releases/latest/download/deno-x86_64-pc-windows-msvc.zip";
+
+    private const string DenoExe = "deno.exe";
+    private const string NodeExe = "node.exe";
     private const string YtDlpExe = "yt-dlp.exe";
     private const string FfmpegExe = "ffmpeg.exe";
     private const string FfprobeExe = "ffprobe.exe";
@@ -29,8 +38,28 @@ public static class VideoTools
         var ytDlp = Find(YtDlpExe, dataDirectory);
         var ffmpeg = Find(FfmpegExe, dataDirectory);
         return ytDlp is not null && ffmpeg is not null
-            ? new VideoToolPaths(ytDlp, Path.GetDirectoryName(ffmpeg)!)
+            ? new VideoToolPaths(ytDlp, Path.GetDirectoryName(ffmpeg)!, FindJsRuntime(dataDirectory))
             : null;
+    }
+
+    // Deno is what yt-dlp prefers; a Node.js that is already installed also works.
+    private static string? FindJsRuntime(string dataDirectory) =>
+        Find(DenoExe, dataDirectory) is { } deno ? "deno:" + deno
+        : Find(NodeExe, dataDirectory) is { } node ? "node:" + node
+        : null;
+
+    /// <summary>How long ago VeloDM's own copy of yt-dlp was downloaded; null when it uses a copy from elsewhere.</summary>
+    public static TimeSpan? ManagedToolAge(string dataDirectory)
+    {
+        var path = Path.Combine(DirectoryFor(dataDirectory), YtDlpExe);
+        try
+        {
+            return File.Exists(path) ? DateTime.UtcNow - File.GetLastWriteTimeUtc(path) : null;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            return null;
+        }
     }
 
     private static string? Find(string fileName, string dataDirectory)
@@ -48,7 +77,7 @@ public static class VideoTools
         return candidates.FirstOrDefault(File.Exists);
     }
 
-    /// <summary>Downloads (or updates) both tools into the tools folder. Reports a step name and its percentage.</summary>
+    /// <summary>Downloads (or updates) the tools into the tools folder. Reports a step name and its percentage.</summary>
     public static async Task InstallAsync(string dataDirectory, IProgress<(string Step, double Percent)>? progress, CancellationToken ct)
     {
         var dir = DirectoryFor(dataDirectory);
@@ -56,6 +85,8 @@ public static class VideoTools
 
         var ytDlpTemp = Path.Combine(dir, YtDlpExe + ".download");
         var zipTemp = Path.Combine(dir, "ffmpeg.zip.download");
+        var denoTemp = Path.Combine(dir, "deno.zip.download");
+        Log.Info("Video tools: download started");
         try
         {
             await DownloadAsync(YtDlpUrl, ytDlpTemp, p => progress?.Report(("Downloading yt-dlp", p)), ct).ConfigureAwait(false);
@@ -64,12 +95,32 @@ public static class VideoTools
 
             await DownloadAsync(FfmpegUrl, zipTemp, p => progress?.Report(("Downloading FFmpeg", p)), ct).ConfigureAwait(false);
             progress?.Report(("Unpacking FFmpeg", 100));
-            ExtractFfmpeg(zipTemp, dir);
+            ExtractPrograms(zipTemp, dir, required: FfmpegExe, FfmpegExe, FfprobeExe);
+
+            try
+            {
+                await DownloadAsync(DenoUrl, denoTemp, p => progress?.Report(("Downloading Deno", p)), ct).ConfigureAwait(false);
+                ExtractPrograms(denoTemp, dir, required: DenoExe, DenoExe);
+            }
+            catch (Exception ex) when (ex is HttpRequestException or IOException or InvalidDataException)
+            {
+                // Everything but YouTube works without it, and YouTube partly: not worth failing the install over.
+                Log.Warn("Video tools: Deno could not be downloaded; YouTube may offer fewer formats", ex);
+            }
+            // The download date is what "how old are the tools" is measured from.
+            File.SetLastWriteTimeUtc(Path.Combine(dir, YtDlpExe), DateTime.UtcNow);
+            Log.Info("Video tools: installed in " + dir);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            Log.Warn("Video tools: download failed", ex);
+            throw;
         }
         finally
         {
             TryDelete(ytDlpTemp);
             TryDelete(zipTemp);
+            TryDelete(denoTemp);
         }
     }
 
@@ -121,19 +172,22 @@ public static class VideoTools
         return null;
     }
 
-    private static void ExtractFfmpeg(string zipPath, string directory)
+    /// <summary>
+    /// Takes only the named programs out of a downloaded archive, each under its own name, so
+    /// nothing else in the archive (and no path it suggests) is written.
+    /// </summary>
+    private static void ExtractPrograms(string zipPath, string directory, string required, params string[] wanted)
     {
         using var zip = ZipFile.OpenRead(zipPath);
         bool found = false;
         foreach (var entry in zip.Entries)
         {
-            // Only the two programs are wanted, under their own names: nothing else in the archive is written.
-            string? name = entry.Name.ToLowerInvariant() switch { FfmpegExe => FfmpegExe, FfprobeExe => FfprobeExe, _ => null };
+            var name = wanted.FirstOrDefault(w => w.Equals(entry.Name, StringComparison.OrdinalIgnoreCase));
             if (name is null) continue;
             entry.ExtractToFile(Path.Combine(directory, name), overwrite: true);
-            found |= name == FfmpegExe;
+            found |= name == required;
         }
-        if (!found) throw new InvalidDataException("The FFmpeg download did not contain ffmpeg.exe.");
+        if (!found) throw new InvalidDataException($"The download did not contain {required}.");
     }
 
     private static void TryDelete(string path)

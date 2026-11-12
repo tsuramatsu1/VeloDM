@@ -39,6 +39,12 @@ public sealed class BrowserBridge : IDisposable
     private readonly HttpListener _listener = new();
     private readonly Func<BridgeRequest, bool> _handler;
 
+    /// <summary>
+    /// Raised for every request from a browser extension, with the version it reports in the
+    /// <see cref="AuthHeader"/> header (extensions before 1.5.1 send "1").
+    /// </summary>
+    public event Action<string>? ExtensionSeen;
+
     public BrowserBridge(int port, Func<BridgeRequest, bool> handler)
     {
         _listener.Prefixes.Add($"http://localhost:{port}/");
@@ -73,6 +79,8 @@ public sealed class BrowserBridge : IDisposable
                 Reply(res, 403, new { error = "forbidden" });
                 return;
             }
+
+            if (req.Headers["Origin"] is not null) ExtensionSeen?.Invoke(req.Headers[AuthHeader]!);
 
             switch (req.HttpMethod, req.Url?.AbsolutePath)
             {

@@ -87,7 +87,7 @@
                         <TextBox Padding="3" Width="80" Text="{Binding BrowserPort}" />
                         <TextBlock Text="(the extension popup must use the same port)" Foreground="{DynamicResource MutedBrush}" Margin="8,0,0,0" VerticalAlignment="Center" />
                     </StackPanel>
-                    <CheckBox Margin="0,0,0,10" Content="Ask before starting a download captured from the browser" IsChecked="{Binding ShowDialogForBrowserDownloads}" />
+                    <CheckBox Margin="0,0,0,10" Content="Show the download dialog (name, folder, start now or later) for downloads from the browser" IsChecked="{Binding ShowDialogForBrowserDownloads}" />
                     <TextBlock Text="Capture these file types from the browser and clipboard:" Style="{StaticResource FieldLabel}" Margin="0,4,0,4" />
                     <TextBox Padding="3" Text="{Binding CaptureExtensions}" TextWrapping="Wrap" AcceptsReturn="True" Height="110"
                              VerticalScrollBarVisibility="Auto" />
@@ -140,7 +140,7 @@
                     <TextBlock x:Name="ToolsStatus" TextWrapping="Wrap" Margin="0,0,0,8" />
                     <Button x:Name="ToolsButton" HorizontalAlignment="Left" Padding="10,4" Margin="0,0,0,14" Click="VideoTools_Click" />
                     <TextBlock TextWrapping="Wrap" Foreground="{DynamicResource MutedBrush}" Margin="0,0,0,8"
-                               Text="Streamed video (YouTube and most video sites, HLS and DASH streams) has no single file to download. VeloDM hands these to two free, open-source programs: yt-dlp downloads the stream and FFmpeg joins picture and sound. They are downloaded from their official GitHub pages into VeloDM's data folder and are not part of VeloDM." />
+                               Text="Streamed video (YouTube and most video sites, HLS and DASH streams) has no single file to download. VeloDM hands these to free, open-source programs: yt-dlp downloads the stream, FFmpeg joins picture and sound, and Deno runs the scripts YouTube requires. They are downloaded from their official GitHub pages into VeloDM's data folder and are not part of VeloDM." />
                     <TextBlock TextWrapping="Wrap" Foreground="{DynamicResource MutedBrush}"
                                Text="Use the Download this video button the browser extension shows on a playing video, or Tasks → Add video from a web page. Copy-protected (DRM) video, as on most paid streaming services, cannot be downloaded." />
                 </StackPanel>

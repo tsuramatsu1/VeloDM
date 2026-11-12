@@ -28,8 +28,17 @@ public sealed class AppSettings
 
     public bool BrowserIntegration { get; set; } = true;
     public int BrowserPort { get; set; } = 9615;
-    // Off by default, like IDM: browser downloads start at once in their category folder.
-    public bool ShowDialogForBrowserDownloads { get; set; } = false;
+    // On by default, like IDM: a download from the browser first shows its name and folder
+    // (already filled in for its category) with Start Download and Download Later.
+    public bool ShowDialogForBrowserDownloads { get; set; } = true;
+
+    /// <summary>
+    /// Which generation of defaults this file was written with. Version 1 files (before 1.3.2)
+    /// started browser downloads without asking; they are switched to asking once, on load.
+    /// </summary>
+    public int SettingsVersion { get; set; }
+
+    private const int CurrentSettingsVersion = 2;
     public string CaptureExtensions { get; set; } =
         "3gp 7z aac apk avi bin bz2 deb dmg epub exe flac flv gz img iso jar m4a m4v mkv mov mp3 mp4 mpeg mpg msi msix " +
         "ogg opus pdf pkg rar rpm tar tgz torrent ts wav webm wma wmv xz zip zst";
@@ -99,15 +108,20 @@ public sealed class AppSettings
     {
         try
         {
-            if (File.Exists(path))
-                return JsonSerializer.Deserialize<AppSettings>(File.ReadAllText(path), JsonOptions) ?? new AppSettings();
+            if (File.Exists(path) && JsonSerializer.Deserialize<AppSettings>(File.ReadAllText(path), JsonOptions) is { } loaded)
+            {
+                if (loaded.SettingsVersion < CurrentSettingsVersion) loaded.ShowDialogForBrowserDownloads = true;
+                loaded.SettingsVersion = CurrentSettingsVersion;
+                return loaded;
+            }
         }
         catch (Exception) { /* corrupt settings: fall back to defaults */ }
-        return new AppSettings();
+        return new AppSettings { SettingsVersion = CurrentSettingsVersion };
     }
 
     public void Save(string path)
     {
+        SettingsVersion = CurrentSettingsVersion; // whatever is saved now is the user's own choice
         var tmp = path + ".tmp";
         File.WriteAllText(tmp, JsonSerializer.Serialize(this, JsonOptions));
         File.Move(tmp, path, overwrite: true);

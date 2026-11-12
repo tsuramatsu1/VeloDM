@@ -43,6 +43,8 @@
             <MenuItem Header="_Help">
                 <MenuItem Header="Install _browser extension…" Click="InstallExtension_Click" />
                 <MenuItem Header="Check for _updates…" Click="CheckUpdates_Click" />
+                <MenuItem Header="Open _log folder" Click="OpenLogFolder_Click"
+                          ToolTip="velodm.log records what VeloDM did and why a download failed" />
                 <MenuItem Header="_About VeloDM" Click="About_Click" />
             </MenuItem>
         </Menu>

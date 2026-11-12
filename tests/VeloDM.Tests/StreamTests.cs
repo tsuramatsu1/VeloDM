@@ -108,6 +108,7 @@ public sealed class StreamTests : IDisposable
         var args = ArgumentsFor("limited 100%.mp4");
         Assert.Contains("bv*[height<=720]+ba/b[height<=720]/bv*+ba/b", args);
         Assert.Equal("307200", args[Array.IndexOf(args, "--limit-rate") + 1]);
+        Assert.Equal("8", args[Array.IndexOf(args, "--concurrent-fragments") + 1]);
         Assert.Equal("", args[Array.IndexOf(args, "--proxy") + 1]);
         Assert.Contains("Cookie:session=abc", args);
         Assert.DoesNotContain("Referer:https://video.example/", args); // only sent with a bare playlist
@@ -163,6 +164,65 @@ public sealed class StreamTests : IDisposable
 
         Assert.True(item.Status == DownloadStatus.Completed, item.ErrorMessage);
         Assert.True(File.Exists(item.FullPath));
+    }
+
+    [Fact]
+    public async Task JavaScript_runtime_is_passed_on_when_one_is_installed()
+    {
+        var fake = Path.Combine(AppContext.BaseDirectory, "FakeYtDlp.exe");
+        _manager.LocateVideoTools = () => new VideoToolPaths(fake, _dir, @"deno:C:\tools\deno.exe");
+        var with = NewItem("https://video.example/watch?v=7", "with.mp4");
+        _manager.Add(with, startNow: true);
+        await WaitForEndAsync(with);
+
+        _manager.LocateVideoTools = () => new VideoToolPaths(fake, _dir);
+        var without = NewItem("https://video.example/watch?v=8", "without.mp4");
+        _manager.Add(without, startNow: true);
+        await WaitForEndAsync(without);
+
+        var args = ArgumentsFor("with.mp4");
+        Assert.Equal(@"deno:C:\tools\deno.exe", args[Array.IndexOf(args, "--js-runtimes") + 1]);
+        Assert.DoesNotContain("--js-runtimes", ArgumentsFor("without.mp4"));
+    }
+
+    [Fact]
+    public async Task Failure_with_old_tools_suggests_updating_them()
+    {
+        var recent = NewItem("https://video.example/broken-1", "recent.mp4");
+        _manager.Add(recent, startNow: true);
+        await WaitForEndAsync(recent);
+        Assert.Equal("[generic] This video is unavailable", recent.ErrorMessage);
+
+        // VeloDM's own copy of yt-dlp, downloaded a month ago.
+        var tools = VideoTools.DirectoryFor(_manager.DataDirectory);
+        Directory.CreateDirectory(tools);
+        var ytDlp = Path.Combine(tools, "yt-dlp.exe");
+        File.WriteAllText(ytDlp, "");
+        File.SetLastWriteTimeUtc(ytDlp, DateTime.UtcNow.AddDays(-30.5));
+        Assert.Equal(30, VideoTools.ManagedToolAge(_manager.DataDirectory)!.Value.Days);
+
+        var old = NewItem("https://video.example/broken-2", "old.mp4");
+        _manager.Add(old, startNow: true);
+        await WaitForEndAsync(old);
+
+        Assert.StartsWith("[generic] This video is unavailable", old.ErrorMessage);
+        Assert.Contains("30 days old", old.ErrorMessage);
+        Assert.Contains("Update video tools and retry", old.ErrorMessage);
+    }
+
+    [Fact]
+    public async Task Video_title_and_length_can_be_read_before_downloading()
+    {
+        var tools = _manager.LocateVideoTools()!;
+
+        var info = await VideoProbe.GetAsync(tools, _manager.Settings, "https://video.example/watch?v=9", "session=abc", CancellationToken.None);
+        var live = await VideoProbe.GetAsync(tools, _manager.Settings, "https://video.example/live", null, CancellationToken.None);
+        var failure = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            VideoProbe.GetAsync(tools, _manager.Settings, "https://unsupported.example/page", null, CancellationToken.None));
+
+        Assert.Equal(new VideoInfo("Fake: Title?", "0:19"), info);
+        Assert.Null(live.Duration);
+        Assert.StartsWith("Unsupported URL", failure.Message);
     }
 
     [Fact]

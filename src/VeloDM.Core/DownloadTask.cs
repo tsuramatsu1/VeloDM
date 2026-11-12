@@ -162,6 +162,7 @@ internal sealed class DownloadTask : IDownloadJob
 
                 var ex = finished.Exception!.GetBaseException();
                 lastError = ex;
+                Log.Warn($"\"{Item.FileName}\": a connection failed at {Format.Size(Item.Downloaded)} of {Item.SizeText}", ex);
                 if (ex is RangeNotSupportedException || IsPermanentHttpError(ex)) throw ex;
 
                 if (ex is HttpRequestException { StatusCode: HttpStatusCode.TooManyRequests or HttpStatusCode.ServiceUnavailable }

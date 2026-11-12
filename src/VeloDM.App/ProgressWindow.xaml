@@ -6,6 +6,9 @@
         WindowStartupLocation="CenterScreen" Background="{DynamicResource WindowBrush}" Foreground="{DynamicResource TextBrush}">
     <DockPanel Margin="16">
         <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,12,0,0">
+            <Button x:Name="UpdateToolsButton" Content="_Update video tools and retry" Style="{DynamicResource DialogButton}"
+                    Click="UpdateTools_Click" Visibility="Collapsed"
+                    ToolTip="Video sites change often. Downloading the newest video tools is the usual fix when a video fails." />
             <Button x:Name="OpenButton" Content="_Open" Style="{DynamicResource DialogButton}" Click="Open_Click" Visibility="Collapsed" />
             <Button Content="Open _folder" Style="{DynamicResource DialogButton}" Click="OpenFolder_Click" />
             <Button x:Name="PauseButton" Content="_Pause" Style="{DynamicResource DialogButton}" Click="PauseResume_Click" />

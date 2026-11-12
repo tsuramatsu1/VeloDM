@@ -139,6 +139,7 @@ public sealed class DownloadManager : IDisposable
     public void Add(DownloadItem item, bool startNow)
     {
         lock (_sync) Items.Add(item);
+        Log.Info($"Added {item.Kind} download \"{item.FileName}\" from {Log.Address(item.Url)} ({(startNow ? "start now" : "later")})");
         if (startNow)
             Start(item);
         else if (item.InQueue)
@@ -229,6 +230,7 @@ public sealed class DownloadManager : IDisposable
     {
         if (item.Kind != DownloadKind.Http) throw new InvalidOperationException("Only HTTP downloads have an address to refresh.");
         await StopAndWaitAsync(item);
+        Log.Info($"Address of \"{item.FileName}\" refreshed: {Log.Address(item.Url)} -> {Log.Address(url)}");
         item.Url = url;
         if (!string.IsNullOrWhiteSpace(referrer)) item.Referrer = referrer;
         if (!string.IsNullOrWhiteSpace(cookies)) item.Cookies = cookies;
@@ -301,6 +303,7 @@ public sealed class DownloadManager : IDisposable
                 var result = await PostProcessor.RunAsync(item, settings, phase => { if (!item.IsTorrent) item.Phase = phase; }, ct)
                     .ConfigureAwait(false);
                 item.Note = result.Note;
+                Log.Info($"After download \"{item.FileName}\": {result.Note ?? "nothing to do"}");
                 try { Save(); } catch (IOException) { }
                 PostProcessed?.Invoke(item, result);
             }
@@ -311,6 +314,7 @@ public sealed class DownloadManager : IDisposable
             catch (Exception ex)
             {
                 item.Note = "After-download steps failed: " + ex.Message;
+                Log.Error($"After-download steps failed for \"{item.FileName}\"", ex);
             }
         }, CancellationToken.None);
     }
@@ -320,6 +324,13 @@ public sealed class DownloadManager : IDisposable
         var item = job.Item;
         Release(job);
         try { Save(); } catch (IOException) { }
+
+        if (item.Status == DownloadStatus.Completed)
+            Log.Info($"Completed \"{item.FileName}\" ({item.SizeText})");
+        else if (item.Status == DownloadStatus.Error)
+            Log.Warn($"Failed \"{item.FileName}\" from {Log.Address(item.Url)} after {Format.Size(item.Downloaded)}: {item.ErrorMessage}");
+        else
+            Log.Info($"Stopped \"{item.FileName}\" at {Format.Size(item.Downloaded)} ({item.Status})");
 
         if (item.Status == DownloadStatus.Completed && !job.CompletionReported)
         {

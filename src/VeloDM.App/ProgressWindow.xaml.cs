@@ -83,6 +83,15 @@ public partial class ProgressWindow : Window
         PauseButton.Content = seeding ? "_Stop seeding" : running ? "_Pause" : "_Resume";
         PauseButton.Visibility = _item.IsCompleted && !seeding ? Visibility.Collapsed : Visibility.Visible;
         OpenButton.Visibility = _item.IsCompleted ? Visibility.Visible : Visibility.Collapsed;
+        UpdateToolsButton.Visibility = _item.IsStream && _item.Status == DownloadStatus.Error && !running
+            ? Visibility.Visible : Visibility.Collapsed;
+    }
+
+    private void UpdateTools_Click(object sender, RoutedEventArgs e)
+    {
+        if (!VideoToolsWindow.Install(this, _manager)) return;
+        _manager.Start(_item);
+        Refresh();
     }
 
     private void RefreshFiles()

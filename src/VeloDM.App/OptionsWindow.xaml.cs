@@ -66,8 +66,12 @@ public partial class OptionsWindow : Window
         var tools = App.Manager.LocateVideoTools();
         ToolsStatus.Text = tools is null
             ? "The video tools are not installed yet. VeloDM offers to download them the first time you download a streamed video."
-            : "The video tools are installed:\n" + tools.YtDlp + "\n" + Path.Combine(tools.FfmpegDirectory, "ffmpeg.exe");
-        ToolsButton.Content = tools is null ? "Download video tools (about 150 MB)" : "Update video tools";
+            : "The video tools are installed:\n" + tools.YtDlp + "\n" + Path.Combine(tools.FfmpegDirectory, "ffmpeg.exe") + "\n" +
+              (tools.JsRuntime is { } runtime
+                  ? runtime[(runtime.IndexOf(':') + 1)..]
+                  : "No JavaScript runtime (Deno) was found: YouTube needs one. Choose Update video tools to add it.") +
+              (VideoTools.ManagedToolAge(App.Manager.DataDirectory) is { } age ? $"\nDownloaded {age.Days} day(s) ago." : "");
+        ToolsButton.Content = tools is null ? "Download video tools (about 250 MB)" : "Update video tools";
     }
 
     private void VideoTools_Click(object sender, RoutedEventArgs e)

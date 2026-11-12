@@ -49,12 +49,16 @@ public partial class App : Application
         };
         DispatcherUnhandledException += OnUnhandledException;
 
+        Log.Initialize(_dataDirectory);
+        Log.Info($"VeloDM {CurrentVersion.ToString(3)} started on {Environment.OSVersion.VersionString}; data folder: {_dataDirectory}");
         Manager = new DownloadManager(_dataDirectory);
         Manager.LoadDownloads();
         ThemeManager.Apply(Manager.Settings.Theme);
         Manager.DownloadCompleted += item => Dispatcher.BeginInvoke(() => OnDownloadCompleted(item));
         Manager.DownloadFailed += item => Dispatcher.BeginInvoke(() =>
-            _tray?.Balloon("Download failed", $"{item.FileName}\n{item.ErrorMessage}", error: true));
+            _tray?.Balloon("Download failed",
+                $"{item.FileName}\n{item.ErrorMessage}" +
+                (item.IsStream ? "\nOpen the download to update the video tools and try again." : ""), error: true));
         Manager.QueueFinished += () => Dispatcher.BeginInvoke(OnQueueFinished);
         Manager.PostProcessed += (item, result) => Dispatcher.BeginInvoke(() =>
         {
@@ -96,6 +100,7 @@ public partial class App : Application
         try
         {
             var update = await UpdateChecker.CheckAsync(feed, CurrentVersion, CancellationToken.None);
+            Log.Info("Update check: " + (update is null ? "no newer version" : $"version {update.Version.ToString(3)} is available"));
             if (update is null)
             {
                 if (!silent)
@@ -121,6 +126,7 @@ public partial class App : Application
         catch (Exception ex) when (ex is HttpRequestException or TimeoutException or OperationCanceledException or ArgumentException
                                        or JsonException or System.IO.IOException or System.ComponentModel.Win32Exception)
         {
+            Log.Warn("Update check failed", ex);
             if (!silent)
                 MessageBox.Show("Could not check for updates: " + ex.Message, "VeloDM", MessageBoxButton.OK, MessageBoxImage.Warning);
         }
@@ -150,6 +156,7 @@ public partial class App : Application
     {
         if (_exiting) return;
         _exiting = true;
+        Log.Info("VeloDM exiting");
         _bridge?.Dispose();
         _tray?.Dispose();
         _main?.CloseForExit();
@@ -168,14 +175,51 @@ public partial class App : Application
         try
         {
             _bridge = new BrowserBridge(Manager.Settings.BrowserPort, HandleBridgeRequest);
+            _bridge.ExtensionSeen += OnExtensionSeen;
             _bridge.Start();
         }
         catch (Exception ex)
         {
             _bridge = null;
+            Log.Warn($"Browser integration could not listen on port {Manager.Settings.BrowserPort}", ex);
             _tray?.Balloon("Browser integration unavailable",
                 $"Could not listen on port {Manager.Settings.BrowserPort}: {ex.Message}", error: true);
         }
+    }
+
+    private int _extensionChecked;
+
+    /// <summary>The version of the extension that ships with this copy of VeloDM, or null if it cannot be read.</summary>
+    private static Version? BundledExtensionVersion()
+    {
+        try
+        {
+            var manifest = System.IO.Path.Combine(AppContext.BaseDirectory, "extension", "manifest.json");
+            using var doc = JsonDocument.Parse(System.IO.File.ReadAllText(manifest));
+            return Version.TryParse(doc.RootElement.GetProperty("version").GetString(), out var version) ? version : null;
+        }
+        catch (Exception ex) when (ex is System.IO.IOException or UnauthorizedAccessException or JsonException
+                                       or System.Collections.Generic.KeyNotFoundException)
+        {
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// A browser keeps running the copy of the extension it loaded, so after VeloDM is upgraded
+    /// the old one stays in use until it is reloaded. Says so once, the first time it calls.
+    /// </summary>
+    private void OnExtensionSeen(string reported)
+    {
+        if (Interlocked.Exchange(ref _extensionChecked, 1) == 1) return;
+        var bundled = BundledExtensionVersion();
+        Version.TryParse(reported, out var running);
+        Log.Info($"Browser extension version: {(running is null ? "older than 1.5.1" : running.ToString())}; this VeloDM ships {bundled}");
+        if (bundled is null || (running is not null && running >= bundled)) return;
+        Dispatcher.BeginInvoke(() => _tray?.Balloon("Reload the VeloDM browser extension",
+            "Your browser is still running an older copy of the extension, so new features are missing. " +
+            "Open the browser's extensions page and press Reload on VeloDM Integration (Help → Install browser extension shows how).",
+            error: true));
     }
 
     /// <summary>Called on a thread-pool thread. Returns whether VeloDM takes the download.</summary>
@@ -186,7 +230,13 @@ public partial class App : Application
             Dispatcher.BeginInvoke(ShowMain);
             return true;
         }
-        if (!request.Force && !request.Stream && !ShouldCapture(request)) return false;
+        string what = $"{(request.Stream ? "video on " : "")}{Log.Address(request.Url)} (file \"{request.FileName}\", type \"{request.Mime}\")";
+        if (!request.Force && !request.Stream && !ShouldCapture(request))
+        {
+            Log.Info("Browser offered " + what + ": left to the browser (file type is not in the capture list)");
+            return false;
+        }
+        Log.Info("Browser offered " + what + ": taken");
         Dispatcher.BeginInvoke(() => _main?.HandleExternalRequest(request));
         return true;
     }
@@ -248,6 +298,7 @@ public partial class App : Application
 
     private void OnUnhandledException(object sender, DispatcherUnhandledExceptionEventArgs e)
     {
+        Log.Error("Unexpected error", e.Exception);
         MessageBox.Show(e.Exception.Message, "VeloDM", MessageBoxButton.OK, MessageBoxImage.Error);
         e.Handled = true;
     }

@@ -86,21 +86,23 @@ public partial class MainWindow : Window
 
         if (request?.Url is { } url && _manager.FindByUrl(url) is { } existing)
         {
-            var answer = MessageBox.Show(VisibleOwner,
+            var answer = OnTop.Ask(this,
                 $"This address is already in the list as \"{existing.FileName}\" ({existing.StatusText}).\n\nAdd it again?",
                 "Duplicate download", MessageBoxButton.YesNo, MessageBoxImage.Question);
             if (answer != MessageBoxResult.Yes) return;
         }
 
         var dialog = new AddDownloadWindow(_manager, request, video);
-        if (IsVisible) dialog.Owner = this;
-        else dialog.Topmost = true;
+        // An owned dialog is hidden along with a minimised owner, so it is only owned by a window on screen.
+        if (IsVisible && WindowState != WindowState.Minimized) dialog.Owner = this;
+        // Asked for from the browser or the tray: the dialog has to come in front of whatever is there now.
+        if (!IsActive) dialog.Topmost = true;
         if (dialog.ShowDialog() != true || dialog.Result is not { } item) return;
-        if (item.IsStream && !VideoToolsWindow.EnsureInstalled(IsVisible ? this : null, _manager)) return;
+        if (item.IsStream && !VideoToolsWindow.EnsureInstalled(this, _manager)) return;
 
         if (!dialog.StartNow) item.InQueue = true;
         _manager.Add(item, dialog.StartNow);
-        if (dialog.StartNow && _manager.Settings.ShowProgressWindow) OpenProgress(item);
+        if (dialog.StartNow && _manager.Settings.ShowProgressWindow) OpenProgress(item, inFront: !IsActive);
     }
 
     public void HandleExternalRequest(BridgeRequest request)
@@ -138,13 +140,13 @@ public partial class MainWindow : Window
         };
         item.FileName = FileNameHelper.MakeUnique(item.SaveDirectory, name);
         _manager.Add(item, startNow: true);
-        if (_manager.Settings.ShowProgressWindow) OpenProgress(item);
+        if (_manager.Settings.ShowProgressWindow) OpenProgress(item, inFront: true);
         else App.Current.Balloon("Download started", item.FileName);
     }
 
     private void AddStream(BridgeRequest request)
     {
-        if (!VideoToolsWindow.EnsureInstalled(IsVisible ? this : null, _manager)) return;
+        if (!VideoToolsWindow.EnsureInstalled(this, _manager)) return;
         const string category = "Video";
         var item = new DownloadItem
         {
@@ -162,7 +164,7 @@ public partial class MainWindow : Window
         if (!string.IsNullOrWhiteSpace(request.Title))
             item.FileName = FileNameHelper.MakeUnique(item.SaveDirectory, FileNameHelper.Sanitize(request.Title) + ".mp4");
         _manager.Add(item, startNow: true);
-        if (_manager.Settings.ShowProgressWindow) OpenProgress(item);
+        if (_manager.Settings.ShowProgressWindow) OpenProgress(item, inFront: true);
         else App.Current.Balloon("Video download started", string.IsNullOrEmpty(item.FileName) ? item.Url : item.FileName);
     }
 
@@ -187,22 +189,27 @@ public partial class MainWindow : Window
         }
     }
 
-    private Window VisibleOwner => IsVisible ? this : new Window { Topmost = true, ShowInTaskbar = false };
-
     // ---- progress windows -------------------------------------------------------------------
 
-    private void OpenProgress(DownloadItem item)
+    /// <param name="inFront">
+    /// For a download started from outside VeloDM (the browser): put the window above the browser
+    /// so the user sees the download start, without taking the keyboard from the page.
+    /// </param>
+    private void OpenProgress(DownloadItem item, bool inFront = false)
     {
-        if (_progressWindows.TryGetValue(item.Id, out var existing))
+        if (!_progressWindows.TryGetValue(item.Id, out var window))
         {
-            existing.Show();
-            existing.Activate();
+            window = new ProgressWindow(_manager, item);
+            _progressWindows[item.Id] = window;
+            window.Closed += (_, _) => _progressWindows.Remove(item.Id);
+        }
+        if (inFront)
+        {
+            OnTop.Show(window);
             return;
         }
-        var window = new ProgressWindow(_manager, item);
-        _progressWindows[item.Id] = window;
-        window.Closed += (_, _) => _progressWindows.Remove(item.Id);
         window.Show();
+        window.Activate();
     }
 
     public void OnDownloadCompleted(DownloadItem item)
@@ -419,6 +426,12 @@ public partial class MainWindow : Window
         MessageBox.Show(this, message, "VeloDM", MessageBoxButton.OK, MessageBoxImage.Information);
 
     private async void CheckUpdates_Click(object sender, RoutedEventArgs e) => await App.Current.CheckForUpdatesAsync(silent: false);
+
+    private void OpenLogFolder_Click(object sender, RoutedEventArgs e)
+    {
+        if (Log.Directory is { } folder && Directory.Exists(folder))
+            Process.Start("explorer.exe", $"\"{folder}\"");
+    }
 
     private void Properties_Click(object sender, RoutedEventArgs e)
     {
