@@ -11,6 +11,15 @@ using VeloDM.Core;
 
 namespace VeloDM.App;
 
+/// <summary>One file of a torrent in the Add dialog's checklist.</summary>
+public sealed class TorrentFileChoice
+{
+    public required string Path { get; init; }
+    public required long Length { get; init; }
+    public string SizeText => Format.Size(Length);
+    public bool Wanted { get; set; } = true;
+}
+
 public partial class AddDownloadWindow : Window
 {
     private static readonly int[] ConnectionChoices = [1, 2, 4, 8, 12, 16, 24, 32];
@@ -28,11 +37,16 @@ public partial class AddDownloadWindow : Window
     private string? _torrentHash;
     private long _torrentSize = -1;
     private byte[]? _torrentBytes;
+    private System.Collections.Generic.List<TorrentFileChoice> _torrentFiles = new();
+
+    // Video mode: the address is a page with a streamed video, handed to yt-dlp.
+    private bool _isVideo;
+    private bool _videoChosenByUser;
 
     public DownloadItem? Result { get; private set; }
     public bool StartNow { get; private set; }
 
-    public AddDownloadWindow(DownloadManager manager, BridgeRequest? request)
+    public AddDownloadWindow(DownloadManager manager, BridgeRequest? request, bool video = false)
     {
         InitializeComponent();
         Icon = AppIcon.ImageSource;
@@ -53,11 +67,20 @@ public partial class AddDownloadWindow : Window
             SetName(FileNameHelper.Sanitize(request.FileName));
             _nameEdited = true;
         }
+        else if (video && !string.IsNullOrWhiteSpace(request?.Title))
+        {
+            SetName(FileNameHelper.Sanitize(request.Title) + ".mp4");
+            _nameEdited = true;
+        }
         UrlBox.Text = request?.Url ?? "";
         _suppress = false;
+        _videoChosenByUser = video;
+        SetVideoMode(video);
         UpdateMode();
 
-        InfoText.Text = UrlBox.Text.Length == 0 ? "Paste a download address or magnet link." : "Fetching file information…";
+        InfoText.Text = UrlBox.Text.Length > 0 ? "Fetching file information…"
+            : video ? "Paste the address of the page the video is on."
+            : "Paste a download address or magnet link.";
         Loaded += (_, _) =>
         {
             if (UrlBox.Text.Length > 0) _ = ProbeAsync();
@@ -86,11 +109,51 @@ public partial class AddDownloadWindow : Window
                 _suppress = false;
             }
         }
-        var visibility = _isTorrent ? Visibility.Collapsed : Visibility.Visible;
+        if (_isTorrent && _isVideo) SetVideoMode(false);
+        var visibility = _isTorrent || _isVideo ? Visibility.Collapsed : Visibility.Visible;
         ConnectionsLabel.Visibility = ConnectionsBox.Visibility = visibility;
+        VideoBox.Visibility = _isTorrent ? Visibility.Collapsed : Visibility.Visible;
+        if (!_isTorrent) ShowTorrentFiles(null);
         // A torrent's file/folder name comes from its metadata; MonoTorrent saves it under that name.
         NameBox.IsReadOnly = _isTorrent;
-        Title = _isTorrent ? "Add Torrent" : "Download File Info";
+        Title = _isTorrent ? "Add Torrent" : _isVideo ? "Download Video" : "Download File Info";
+    }
+
+    private void SetVideoMode(bool video)
+    {
+        _isVideo = video;
+        VideoBox.IsChecked = video;
+        if (!video || _categoryEdited) return;
+        _suppress = true;
+        CategoryBox.SelectedItem = "Video";
+        if (!_folderEdited) FolderBox.Text = Categories.FolderFor(_manager.Settings, "Video");
+        _suppress = false;
+    }
+
+    private void VideoBox_Click(object sender, RoutedEventArgs e)
+    {
+        _videoChosenByUser = true;
+        SetVideoMode(VideoBox.IsChecked == true);
+        if (_isVideo && !_nameEdited) SetName("");
+        UpdateMode();
+        _ = ProbeAsync();
+    }
+
+    private void ShowTorrentFiles(Torrent? torrent)
+    {
+        _torrentFiles = torrent is null
+            ? new()
+            : torrent.Files.Select(f => new TorrentFileChoice { Path = f.Path, Length = f.Length }).ToList();
+        TorrentFilesList.ItemsSource = _torrentFiles;
+        // A single-file torrent has nothing to choose between.
+        TorrentFilesPanel.Visibility = _torrentFiles.Count > 1 ? Visibility.Visible : Visibility.Collapsed;
+    }
+
+    private void TorrentFile_Click(object sender, RoutedEventArgs e)
+    {
+        long wanted = _torrentFiles.Where(f => f.Wanted).Sum(f => f.Length);
+        int count = _torrentFiles.Count(f => f.Wanted);
+        InfoText.Text = $"BitTorrent     Selected: {count} of {_torrentFiles.Count} files, {Format.Size(wanted)}";
     }
 
     private void SetName(string name)
@@ -120,9 +183,16 @@ public partial class AddDownloadWindow : Window
         }
         if (!App.IsHttpUrl(source))
         {
-            InfoText.Text = source.Length == 0
-                ? "Paste a download address or magnet link."
+            InfoText.Text = _isVideo ? "Paste the address of the page the video is on."
+                : source.Length == 0 ? "Paste a download address or magnet link."
                 : "Enter an http(s) address, a magnet link or the path of a .torrent file.";
+            return;
+        }
+        if (_isVideo)
+        {
+            InfoText.Text = "VeloDM will read this page and download the video on it" +
+                            (_manager.LocateVideoTools() is null ? " (the video tools are downloaded first)." : ".") +
+                            "\nLeave Save as empty to name the file after the video's title.";
             return;
         }
 
@@ -133,6 +203,20 @@ public partial class AddDownloadWindow : Window
                 _request?.UserAgent ?? _manager.Settings.UserAgent, cts.Token);
             if (cts.IsCancellationRequested) return;
             _info = info;
+            // A web page or a stream playlist is not the file the user is after: offer the video on it instead.
+            bool page = info.ContentType is { } type
+                        && (type.Equals("text/html", StringComparison.OrdinalIgnoreCase)
+                            || type.Contains("mpegurl", StringComparison.OrdinalIgnoreCase)
+                            || type.Equals("application/dash+xml", StringComparison.OrdinalIgnoreCase));
+            if (page && !_videoChosenByUser)
+            {
+                SetVideoMode(true);
+                if (!_nameEdited) SetName("");
+                UpdateMode();
+                InfoText.Text = "This address is a web page, not a file, so VeloDM will download the video on it.\n" +
+                                "Untick the box below to save the page itself instead.";
+                return;
+            }
             if (!_nameEdited) SetName(info.FileName);
             InfoText.Text = $"Size: {(info.Size >= 0 ? Format.Size(info.Size) : "Unknown")}     " +
                             $"Resume / multi-connection: {(info.AcceptRanges ? "Yes" : "No")}" +
@@ -158,10 +242,11 @@ public partial class AddDownloadWindow : Window
                 _torrentHash = TorrentSources.HashOf(magnet.InfoHashes);
                 _torrentSize = magnet.Size ?? -1;
                 _torrentBytes = null;
+                ShowTorrentFiles(null);
                 SetName(TorrentSources.NameFor(magnet));
                 InfoText.Text = $"BitTorrent magnet link     Hash: {_torrentHash[..12]}…" +
                                 (magnet.Size is long size ? $"     Size: {Format.Size(size)}" : "") +
-                                "\nFile details are fetched from peers when the download starts.";
+                                "\nThe file list is fetched from peers when the download starts; you can untick files in the progress window then.";
                 return;
             }
 
@@ -173,6 +258,7 @@ public partial class AddDownloadWindow : Window
             _torrentBytes = bytes;
             _torrentHash = TorrentSources.HashOf(torrent.InfoHashes);
             _torrentSize = torrent.Size;
+            ShowTorrentFiles(torrent);
             SetName(torrent.Name);
             InfoText.Text = $"BitTorrent     Size: {Format.Size(torrent.Size)}     Files: {torrent.Files.Count}" +
                             (torrent.IsPrivate ? "     Private tracker" : "") +
@@ -192,7 +278,7 @@ public partial class AddDownloadWindow : Window
     {
         if (_suppress) return;
         UpdateMode();
-        if (!_nameEdited && !_isTorrent && App.IsHttpUrl(Source)) SetName(FileNameHelper.FromUrl(new Uri(Source)));
+        if (!_nameEdited && !_isTorrent && !_isVideo && App.IsHttpUrl(Source)) SetName(FileNameHelper.FromUrl(new Uri(Source)));
         _debounce.Stop();
         _debounce.Start();
     }
@@ -201,7 +287,7 @@ public partial class AddDownloadWindow : Window
     {
         if (_suppress || _isTorrent) return;
         _nameEdited = true;
-        if (!_categoryEdited)
+        if (!_categoryEdited && !_isVideo)
         {
             _suppress = true;
             CategoryBox.SelectedItem = Categories.ForFileName(NameBox.Text);
@@ -259,7 +345,9 @@ public partial class AddDownloadWindow : Window
             return;
         }
 
-        Result = _isTorrent ? BuildTorrentItem(source, folder) : BuildHttpItem(source, folder);
+        Result = _isTorrent ? BuildTorrentItem(source, folder)
+            : _isVideo ? BuildStreamItem(source, folder)
+            : BuildHttpItem(source, folder);
         if (Result is null) return;
         StartNow = startNow;
         DialogResult = true;
@@ -283,6 +371,36 @@ public partial class AddDownloadWindow : Window
         };
     }
 
+    private DownloadItem? BuildStreamItem(string url, string folder)
+    {
+        if (!App.IsHttpUrl(url))
+        {
+            Warn("A video needs the http(s) address of the page it is on.");
+            return null;
+        }
+        // An empty name is filled in from the video's title once its page has been read.
+        var name = NameBox.Text.Trim();
+        if (name.Length > 0)
+        {
+            name = FileNameHelper.Sanitize(name);
+            if (Path.GetExtension(name).Length == 0) name += ".mp4";
+            name = FileNameHelper.MakeUnique(folder, name);
+        }
+        return new DownloadItem
+        {
+            Kind = DownloadKind.Stream,
+            Url = url,
+            ManifestUrl = _request?.ManifestUrl,
+            FileName = name,
+            SaveDirectory = folder,
+            Category = CategoryBox.SelectedItem as string ?? "Video",
+            Referrer = _request?.Referrer,
+            Cookies = _request?.Cookies,
+            UserAgent = _request?.UserAgent,
+            ResumeSupported = true,
+        };
+    }
+
     private DownloadItem? BuildTorrentItem(string source, string folder)
     {
         if (_torrentHash is null)
@@ -295,6 +413,12 @@ public partial class AddDownloadWindow : Window
             Warn($"This torrent is already in the list as \"{existing.FileName}\" ({existing.StatusText}).");
             return null;
         }
+        var skipped = _torrentFiles.Where(f => !f.Wanted).ToList();
+        if (_torrentFiles.Count > 0 && skipped.Count == _torrentFiles.Count)
+        {
+            Warn("Tick at least one file to download.");
+            return null;
+        }
 
         var item = new DownloadItem
         {
@@ -305,7 +429,8 @@ public partial class AddDownloadWindow : Window
             SaveDirectory = folder,
             Category = CategoryBox.SelectedItem as string ?? Categories.Torrents,
             InfoHash = _torrentHash,
-            TotalSize = _torrentSize,
+            SkippedFiles = skipped.Select(f => f.Path).ToList(),
+            TotalSize = skipped.Count > 0 ? _torrentFiles.Where(f => f.Wanted).Sum(f => f.Length) : _torrentSize,
             ResumeSupported = true,
             Referrer = _request?.Referrer,
             Cookies = _request?.Cookies,

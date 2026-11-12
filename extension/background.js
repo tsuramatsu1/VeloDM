@@ -2,6 +2,9 @@
 // Every http(s) download the browser starts is paused and offered to the VeloDM app.
 // The app decides (by file type) whether to take it; if it declines or is not running,
 // the browser download simply resumes.
+// Streamed video is handed over as the address of the page it plays on, together with the
+// stream playlist (.m3u8 / .mpd) the page loaded, for sites VeloDM's video tools do not know.
+// Runs as a service worker in Chromium browsers and as an event page in Firefox.
 
 const DEFAULTS = { enabled: true, port: 9615 };
 const REQUEST_TIMEOUT_MS = 2500;
@@ -51,13 +54,73 @@ async function sendToApp({ url, referrer, fileName, mime, force }) {
   return result.accepted === true;
 }
 
+// ---- stream playlists --------------------------------------------------------------------
+// The first playlist a tab requests after a navigation is normally the master playlist.
+const PLAYLIST = /\.(m3u8|mpd)([?#]|$)/i;
+const playlists = new Map(); // tabId -> url; mirrored in session storage because this script is unloaded when idle
+const sessionStore = chrome.storage.session;
+
+async function playlistFor(tabId) {
+  if (playlists.has(tabId)) return playlists.get(tabId);
+  if (!sessionStore) return "";
+  const key = `playlist:${tabId}`;
+  return (await sessionStore.get(key).catch(() => ({})))[key] || "";
+}
+
+function forgetPlaylist(tabId) {
+  playlists.delete(tabId);
+  if (sessionStore) sessionStore.remove(`playlist:${tabId}`).catch(() => {});
+}
+
+if (chrome.webRequest) {
+  chrome.webRequest.onBeforeRequest.addListener(
+    (details) => {
+      if (details.tabId < 0 || !PLAYLIST.test(details.url)) return;
+      playlistFor(details.tabId).then((known) => {
+        if (known) return; // later requests are the per-quality playlists
+        playlists.set(details.tabId, details.url);
+        if (sessionStore) sessionStore.set({ [`playlist:${details.tabId}`]: details.url }).catch(() => {});
+      });
+    },
+    { urls: ["http://*/*", "https://*/*"], types: ["xmlhttprequest", "media", "other"] },
+  );
+  chrome.tabs.onUpdated.addListener((tabId, change) => {
+    if (change.url) forgetPlaylist(tabId);
+  });
+  chrome.tabs.onRemoved.addListener(forgetPlaylist);
+}
+
+async function sendStreamToApp(tab, frameUrl, title) {
+  // A player inside a frame is addressed by the frame's own page (e.g. an embedded player).
+  const url = frameUrl || tab.url;
+  if (!/^https?:/i.test(url || "")) return false;
+  const result = await callApp("/add", {
+    url,
+    stream: true,
+    title: title || tab.title || "",
+    manifestUrl: await playlistFor(tab.id),
+    referrer: tab.url || url,
+    cookies: await cookieHeader(url),
+    userAgent: navigator.userAgent,
+    force: true,
+  });
+  return result.accepted === true;
+}
+
 // onDeterminingFilename rather than onCreated: by this point the server has answered, so the
 // real file name is known. Many file hosts use links with no extension in them and only name
 // the file (e.g. "archive.rar") in the response, which onCreated cannot see yet.
-chrome.downloads.onDeterminingFilename.addListener((item, suggest) => {
-  suggest(); // keep the browser's own file name; we only want to look at it
-  offerToApp(item);
-});
+// Firefox has no onDeterminingFilename; its onCreated already carries the target file name.
+if (chrome.downloads.onDeterminingFilename) {
+  chrome.downloads.onDeterminingFilename.addListener((item, suggest) => {
+    suggest(); // keep the browser's own file name; we only want to look at it
+    offerToApp(item);
+  });
+} else {
+  chrome.downloads.onCreated.addListener((item) => {
+    offerToApp(item);
+  });
+}
 
 async function offerToApp(item) {
   const url = item.finalUrl || item.url;
@@ -96,13 +159,22 @@ function createMenus() {
       title: "Download with VeloDM",
       contexts: ["link", "image", "video", "audio"],
     });
+    chrome.contextMenus.create({
+      id: "velodm-page-video",
+      title: "Download the video on this page with VeloDM",
+      contexts: ["page", "frame", "video"],
+    });
   });
 }
 
 chrome.runtime.onInstalled.addListener(createMenus);
 chrome.runtime.onStartup.addListener(createMenus);
 
-chrome.contextMenus.onClicked.addListener(async (info) => {
+chrome.contextMenus.onClicked.addListener(async (info, tab) => {
+  if (info.menuItemId === "velodm-page-video") {
+    if (tab) await sendStreamToApp(tab, info.frameUrl, "").catch(() => false);
+    return;
+  }
   const url = info.linkUrl || info.srcUrl;
   if (!url || !/^(https?|magnet):/i.test(url)) return;
   try {
@@ -126,6 +198,13 @@ chrome.runtime.onMessage.addListener((message, _sender, reply) => {
   if (message?.type === "download" && /^(https?|magnet):/i.test(message.url || "")) {
     // From the video pill or a clicked magnet link (content.js).
     sendToApp({ url: message.url, referrer: message.referrer, fileName: message.fileName, force: true })
+      .then((accepted) => reply({ ok: accepted }))
+      .catch(() => reply({ ok: false }));
+    return true;
+  }
+  if (message?.type === "stream" && _sender.tab) {
+    // From the video pill on a chunked stream (content.js).
+    sendStreamToApp(_sender.tab, _sender.frameId ? _sender.url : "", message.title)
       .then((accepted) => reply({ ok: accepted }))
       .catch(() => reply({ ok: false }));
     return true;

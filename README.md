@@ -1,13 +1,16 @@
 # VeloDM
 
 A Windows download manager in the spirit of Internet Download Manager: multi-connection
-downloads with dynamic segmentation, BitTorrent (magnet links and .torrent files), pause/resume
-that survives restarts, a queue with a scheduler, a global speed limiter, file-type categories,
-clipboard monitoring, a tray icon and a Chrome/Edge extension that hands browser downloads to
-the app.
+downloads with dynamic segmentation, BitTorrent (magnet links and .torrent files), streamed video
+(YouTube, HLS, DASH), pause/resume that survives restarts, a queue with a scheduler, speed limits,
+file-type categories, clipboard monitoring, a tray icon, light and dark themes, and a browser
+extension that hands downloads and videos to the app.
 
-Built with .NET 10 and WPF. The only third-party dependency is
-[MonoTorrent](https://github.com/alanmcgovern/monotorrent) (MIT), used for BitTorrent.
+Built with .NET 10 and WPF. Third-party libraries:
+[MonoTorrent](https://github.com/alanmcgovern/monotorrent) (BitTorrent) and
+[SharpCompress](https://github.com/adamhathcock/sharpcompress) (archive extraction), both MIT.
+Streamed video uses [yt-dlp](https://github.com/yt-dlp/yt-dlp) and [FFmpeg](https://ffmpeg.org),
+separate programs that VeloDM downloads on request. See `THIRD-PARTY-NOTICES.md`.
 
 ## Features
 
@@ -18,12 +21,18 @@ Built with .NET 10 and WPF. The only third-party dependency is
 | **Pause / resume** | Segment state is saved to `%LocalAppData%\VeloDM\downloads.json`. Resume re-checks the server and continues only if the size is unchanged and ranges are still supported. |
 | **Robustness** | Per-read 30 s stall timeout, automatic retries with back-off, fewer connections when the server answers 429/503, an immediate stop on permanent 4xx errors, and a single-connection fallback when the server ignores ranges or does not send a size. |
 | **Queue + scheduler** | "Download Later" puts items in the queue. The queue runs N downloads at a time, can start and stop daily at set times, and can exit, sleep or shut down the PC when it finishes. |
-| **Speed limiter** | A global token bucket shared by all connections (Downloads → Speed limiter). |
+| **Speed limiter** | A global token bucket shared by all connections (Downloads → Speed limiter), plus an optional limit per download (right-click → Speed limit for this download). |
+| **Streamed video** | YouTube and most video sites, HLS and DASH streams: see [Streamed video](#streamed-video). |
+| **Refresh expired links** | Right-click an unfinished download → **Refresh download address**: get a new link for the same file and the download carries on from where it stopped. See [Expired links](#expired-links). |
+| **After a download** | Optionally extract archives (zip, rar, 7z, tar, gz) and scan the file for viruses (Windows Defender or your own scanner). Right-click → **Verify checksum** compares a file with the MD5/SHA checksum its site publishes. |
+| **Proxy** | Options → Connection: use the Windows setting, no proxy, or your own HTTP/HTTPS/SOCKS5 proxy with optional login. |
+| **Update check** | Looks for a newer release at startup and from Help → Check for updates. |
+| **Dark theme** | Options → General → Appearance: Light, Dark, or the same as Windows. |
 | **Categories** | Compressed, Documents, Music, Programs, Video and General, each saved to its own subfolder of your Downloads folder by default. |
 | **Clipboard monitoring** | Copying a link to a captured file type opens the Add Download dialog. |
 | **Browser integration** | The extension sends downloads, plus cookies, referrer and user agent so logged-in and protected links work, to the app on `localhost:9615`. It also adds "Download with VeloDM" to the right-click menu and a download pill on playing videos. |
 | **BitTorrent** | Magnet links, `.torrent` URLs and local `.torrent` files, with DHT, trackers, peer exchange, local peer discovery and UPnP. Torrents share the same list, queue, scheduler and speed limiter as HTTP downloads. |
-| **Progress window** | Per-download window. For HTTP it shows a live segment map and a connection table. For torrents it shows a piece map, seeds/peers and a file list. |
+| **Progress window** | Per-download window. For HTTP it shows a live segment map and a connection table. For torrents it shows a piece map, seeds/peers and a file list where files can be unticked. |
 | **Tray + single instance** | Closing the window leaves VeloDM in the tray. Running `VeloDM.exe <url>` while it is open hands the URL to the running instance. |
 | **Start with Windows** | **Options → General → Start VeloDM when I sign in to Windows** starts it hidden in the tray at sign-in, so browser capture and the scheduler are always ready. It is off by default and is a per-user setting (a value under the HKCU `Run` key), so it also shows up in Task Manager's Startup apps. |
 
@@ -63,6 +72,58 @@ Command-line options:
 | `VeloDM.exe <url>` | Opens the Add Download dialog for the URL (forwards it to an already-running instance). |
 | `--tray` | Starts hidden in the tray. The start-with-Windows option uses this. |
 | `--software-render` (or env `VELODM_SOFTWARE=1`) | Forces WPF software rendering, for VMs or remote sessions where windows show up blank. |
+| env `VELODM_DATA=<folder>` | Keeps settings, the download list and the video tools in that folder instead of `%LocalAppData%\VeloDM`, and runs as a separate instance (portable use, testing). |
+
+## Streamed video
+
+Video sites rarely serve a video as one file: the player fetches it in small pieces (HLS or DASH),
+often with picture and sound separate. VeloDM hands these to two free, open-source programs:
+**yt-dlp** downloads the stream and **FFmpeg** joins picture and sound into one `.mp4`.
+
+They are not part of VeloDM. The first time you download a streamed video, VeloDM asks, then
+downloads them from their official GitHub release pages (about 150 MB) into
+`%LocalAppData%\VeloDM\tools`; the yt-dlp download is checked against its published SHA-256.
+**Options → Video** shows whether they are installed and updates them. If you already have
+`yt-dlp.exe` and `ffmpeg.exe` on your `PATH`, those are used instead. Video sites change often, so
+when a site stops working, **Update video tools** is the first thing to try.
+
+Ways to start a video download:
+
+- the **Download this video** pill the browser extension shows on a playing video;
+- right-click a page → **Download the video on this page with VeloDM**;
+- **Tasks → Add video from a web page** and paste the page address. Pasting a page address into
+  **Add URL** works too: VeloDM notices it is a page, not a file, and switches to video.
+
+**Options → Video → Preferred quality** caps the resolution (best available by default). A video
+download can be paused and resumed; finished parts are kept. If yt-dlp does not recognise a page,
+VeloDM retries with the stream playlist (`.m3u8` / `.mpd`) the extension saw the page load.
+Copy-protected (DRM) video, as on most paid streaming services, cannot be downloaded.
+
+## Expired links
+
+File hosts often hand out links that stop working after a while, so a paused download fails with
+"403 Forbidden" when resumed. Right-click it → **Refresh download address**, then either:
+
+1. click **Open the download page** and start the download there again: with the browser
+   extension installed, VeloDM catches the new link and fills it in; or
+2. paste a new link yourself.
+
+VeloDM checks that the new link is the same file (same size, resumable) and continues from the
+bytes already on disk. If it is a different file it says so before starting over.
+
+## After a download
+
+**Options → After download:**
+
+- **Extract archives** unpacks zip, rar, 7z, tar and gzip files into a folder named after the
+  archive, next to it. The archive is kept. Password-protected archives and the later volumes of a
+  multi-part set are left alone. **Extract here** in the right-click menu does the same on demand.
+- **Scan finished downloads for viruses** runs Windows Defender on the file (report only: it
+  leaves the decision about a detected threat to Defender's own real-time protection), or the
+  scanner command you enter, with `{file}` standing for the downloaded file. A flagged download is
+  not extracted, and VeloDM shows a warning.
+
+The result ("No threats found · Extracted to …") is shown in the download's Status column.
 
 ## BitTorrent
 
@@ -78,6 +139,12 @@ Three ways to add a torrent:
 Torrents save to `Downloads\Torrents` by default. The Add dialog shows the name, size and file count
 before you start. It refuses a torrent that's already in the list, matching on info-hash.
 
+**Choosing files:** for a `.torrent` with several files, the Add dialog lists them with tick boxes.
+For a magnet link the list is only known once the download has started, so untick files in the
+progress window's file list then. The list can be changed at any time; ticking a file on a
+finished torrent starts it downloading again. A piece shared with a neighbouring file is still
+downloaded, so a small part of an unticked file can appear on disk.
+
 **Options → BitTorrent:**
 
 - listening port (default 51515)
@@ -92,7 +159,7 @@ listening port and joins no DHT until you actually download a torrent. Pausing s
 data, so resuming skips the full hash check. MonoTorrent verifies every piece by hash. A finished
 torrent that is still seeding shows "Seeding (ratio x.xx)". Pausing it stops seeding.
 
-## Browser extension (Chrome, Edge, Brave, other Chromium browsers)
+## Browser extension (Chrome, Edge, Brave, other Chromium browsers, Firefox)
 
 Chromium browsers do not let an installer add an extension from outside their store, so the last
 step is manual. **Help → Install browser extension** makes it short: it lists the browsers it
@@ -115,11 +182,12 @@ captured from the browser**.
 
 **Video pill:** when a video or audio file plays on a page, a small **Download this video** pill
 appears at its top-right corner. Clicking it sends the file to VeloDM, named after the page title.
-The pill appears for media served as a plain file (for example an `.mp4` or `.webm` URL), and on
-**X (Twitter) and Facebook**. Those two stream their videos in chunks, but the data they load for
-each post also lists ordinary `.mp4` versions; the extension reads that list on those sites and
-offers the best-quality one. Other streaming sites, such as YouTube, are not covered: they have no
-single file to download. The extension popup has a switch to turn the pill off.
+For media served as a plain file (for example an `.mp4` or `.webm` URL) that file is downloaded
+directly. On **X (Twitter) and Facebook**, which stream their videos in chunks, the data they load
+for each post also lists ordinary `.mp4` versions; the extension reads that list and offers the
+best-quality one. On every other streaming site (YouTube and the like) the pill sends the page
+address and VeloDM downloads the video with its video tools: see [Streamed video](#streamed-video).
+No pill is shown on copy-protected (DRM) video. The extension popup has a switch to turn the pill off.
 
 **Magnet links:** clicking a magnet link on a page sends it straight to VeloDM. If the app is not
 running, the link is followed normally.
@@ -127,6 +195,13 @@ running, the link is followed normally.
 **File names:** the extension looks at a download after the server has answered, so links with no
 file extension in them (common on file hosts) are still recognised by the real file name, such as
 `archive.rar`.
+
+**Firefox and the browser stores:** `tools\package-extension.ps1` builds store-ready packages for
+the Chrome Web Store, Edge Add-ons and Firefox (the Firefox one has its own manifest). Publishing
+needs your own developer accounts; `docs/PUBLISHING-EXTENSION.md` is the checklist, including how
+to get a signed Firefox `.xpi` without listing it on the store. Until it is published, Firefox can
+load the Firefox package temporarily from `about:debugging`. The Firefox build has not been run in
+Firefox yet.
 
 ### Security of the local endpoint
 
@@ -139,16 +214,22 @@ page cannot queue a download. Requests that carry an `Origin` header are accepte
 
 ```
 src/VeloDM.Core     Engine: DownloadTask (HTTP segmentation), TorrentTask + TorrentService
-                    (BitTorrent via MonoTorrent), DownloadManager (queue, scheduler,
-                    persistence), HttpEngine (probe + requests), SpeedLimiter, settings
-src/VeloDM.App      WPF UI: main window, Add/Progress/Options/Batch dialogs, tray icon,
-                    clipboard monitor, BrowserBridge (localhost endpoint)
+                    (BitTorrent via MonoTorrent), StreamTask + VideoTools (streamed video via
+                    yt-dlp), DownloadManager (queue, scheduler, persistence), HttpEngine (probe,
+                    requests, proxy), PostProcessor (extract, virus scan), Checksums,
+                    UpdateChecker, SpeedLimiter, settings
+src/VeloDM.App      WPF UI: main window, Add/Progress/Options/Batch dialogs, refresh-address,
+                    checksum and video-tools dialogs, themes, tray icon, clipboard monitor,
+                    BrowserBridge (localhost endpoint)
 extension/          Manifest V3 browser extension
 tests/VeloDM.Tests  Engine tests: a local range-capable HTTP server, plus a loopback BitTorrent
                     swarm (tracker + seeding engine) for .torrent and magnet downloads
+tests/FakeYtDlp     Stand-in for yt-dlp, so the streamed-video tests need no internet or tools
 installer/          WiX project and build.ps1 that produce the .msi installer
 tools/IconGen       Draws the app icon: `dotnet run --project tools/IconGen` rewrites
                     src/VeloDM.App/Assets/VeloDM.ico and extension/icons/*.png
+tools/package-extension.ps1   Builds the store packages of the extension into dist/extension
+docs/               Publishing guide for the browser extension
 ```
 
 Data lives in `%LocalAppData%\VeloDM` (`settings.json`, `downloads.json`). Partial files sit next
@@ -156,11 +237,21 @@ to their destination as `<name>.vdmpart` until they complete.
 
 ## Known limitations
 
-- HTTP/HTTPS and BitTorrent only. There is no FTP or HLS/DASH stream grabbing.
-- Torrents always download every file. There is no per-file selection yet. Magnet links that list
-  only WebTorrent (`wss://`) trackers rely on DHT to find peers.
-- The speed limiter covers HTTP and torrents separately: each is held to the limit, so together they
-  can use up to twice the limit.
-- Downloads behind POST forms or one-time tokens may not resume after the link expires. Use
-  **Redownload** with a fresh link.
-- The extension targets Chromium browsers. Firefox needs a `background.scripts` manifest variant.
+- No FTP.
+- Streamed video depends on yt-dlp and FFmpeg, which VeloDM downloads on request but does not
+  include. DRM-protected video cannot be downloaded. A video download shows no segment map, and a
+  changed speed limit applies to it only after a pause and resume.
+- Magnet links that list only WebTorrent (`wss://`) trackers rely on DHT to find peers.
+- The speed limiter covers HTTP, torrents and video separately: each is held to the limit, so
+  together they can use more than the limit.
+- The proxy setting covers HTTP downloads and video, not BitTorrent traffic.
+- Downloads behind POST forms may not resume after the link expires even with a refreshed address.
+- The extension is not in the browser stores yet, so it is loaded unpacked (Chromium) or
+  temporarily (Firefox). The Firefox build is untested in Firefox.
+- The update check finds published GitHub releases of the repository in Options → General; until
+  a release is published there, it reports that the current version is the latest.
+
+## Licence
+
+VeloDM is released under the MIT License: see `LICENSE`. Third-party software is listed in
+`THIRD-PARTY-NOTICES.md`.

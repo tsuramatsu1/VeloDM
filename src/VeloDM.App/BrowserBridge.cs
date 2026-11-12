@@ -16,7 +16,11 @@ public sealed record BridgeRequest(
     string? FileName = null,
     string? Mime = null,
     bool Force = false,
-    bool ShowWindow = false);
+    bool ShowWindow = false,
+    // Streamed video: Url is the page showing it, ManifestUrl a playlist the browser saw there.
+    bool Stream = false,
+    string? ManifestUrl = null,
+    string? Title = null);
 
 /// <summary>
 /// Loopback HTTP endpoint used by the browser extension and by second app instances.
@@ -95,7 +99,13 @@ public sealed class BrowserBridge : IDisposable
                         Reply(res, 400, new { error = "an http(s) url or magnet link is required" });
                         return;
                     }
-                    bool accepted = _handler(payload! with { ShowWindow = false });
+                    if (payload!.Stream && !App.IsHttpUrl(payload.Url))
+                    {
+                        Reply(res, 400, new { error = "a video needs the http(s) address of its page" });
+                        return;
+                    }
+                    var manifest = App.IsHttpUrl(payload.ManifestUrl) ? payload.ManifestUrl : null;
+                    bool accepted = _handler(payload with { ShowWindow = false, ManifestUrl = manifest });
                     Reply(res, 200, new { ok = true, accepted });
                     break;
 

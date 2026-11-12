@@ -4,6 +4,7 @@
     <Project Path="src/VeloDM.Core/VeloDM.Core.csproj" />
   </Folder>
   <Folder Name="/tests/">
+    <Project Path="tests/FakeYtDlp/FakeYtDlp.csproj" />
     <Project Path="tests/VeloDM.Tests/VeloDM.Tests.csproj" />
   </Folder>
 </Solution>

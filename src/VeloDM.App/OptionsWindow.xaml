@@ -1,20 +1,12 @@
 <Window x:Class="VeloDM.App.OptionsWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="Options" Width="560" Height="480" ResizeMode="NoResize"
-        WindowStartupLocation="CenterOwner" Background="White">
-    <Window.Resources>
-        <Style TargetType="CheckBox">
-            <Setter Property="Margin" Value="0,0,0,10" />
-        </Style>
-        <Style TargetType="TextBox">
-            <Setter Property="Padding" Value="3" />
-        </Style>
-    </Window.Resources>
+        Title="Options" Width="640" Height="600" ResizeMode="NoResize"
+        WindowStartupLocation="CenterOwner" Background="{DynamicResource WindowBrush}" Foreground="{DynamicResource TextBrush}">
     <DockPanel Margin="14">
         <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,12,0,0">
-            <Button Content="OK" Style="{StaticResource DialogButton}" IsDefault="True" Click="Ok_Click" />
-            <Button Content="Cancel" Style="{StaticResource DialogButton}" IsCancel="True" />
+            <Button Content="OK" Style="{DynamicResource DialogButton}" IsDefault="True" Click="Ok_Click" />
+            <Button Content="Cancel" Style="{DynamicResource DialogButton}" IsCancel="True" />
         </StackPanel>
 
         <TabControl x:Name="Tabs" Padding="14">
@@ -23,13 +15,21 @@
                     <TextBlock Text="Default download folder" Style="{StaticResource FieldLabel}" Margin="0,0,0,4" />
                     <DockPanel Margin="0,0,0,10">
                         <Button DockPanel.Dock="Right" Content="Browse…" Padding="10,2" Margin="6,0,0,0" Click="Browse_Click" />
-                        <TextBox Text="{Binding DownloadFolder}" />
+                        <TextBox Padding="3" Text="{Binding DownloadFolder}" />
                     </DockPanel>
-                    <CheckBox x:Name="RunAtStartupBox" Content="Start VeloDM when I sign in to Windows (hidden in the system tray)" />
-                    <CheckBox Content="Save each category in its own subfolder (Video, Music, Programs…)" IsChecked="{Binding UseCategoryFolders}" />
-                    <CheckBox Content="Watch the clipboard for download links" IsChecked="{Binding MonitorClipboard}" />
-                    <CheckBox Content="Keep running in the system tray when the window is closed" IsChecked="{Binding MinimizeToTray}" />
-                    <CheckBox Content="Show the progress window when a download starts" IsChecked="{Binding ShowProgressWindow}" />
+                    <CheckBox Margin="0,0,0,10" x:Name="RunAtStartupBox" Content="Start VeloDM when I sign in to Windows (hidden in the system tray)" />
+                    <CheckBox Margin="0,0,0,10" Content="Save each category in its own subfolder (Video, Music, Programs…)" IsChecked="{Binding UseCategoryFolders}" />
+                    <CheckBox Margin="0,0,0,10" Content="Watch the clipboard for download links" IsChecked="{Binding MonitorClipboard}" />
+                    <CheckBox Margin="0,0,0,10" Content="Keep running in the system tray when the window is closed" IsChecked="{Binding MinimizeToTray}" />
+                    <CheckBox Margin="0,0,0,10" Content="Show the progress window when a download starts" IsChecked="{Binding ShowProgressWindow}" />
+                    <StackPanel Orientation="Horizontal" Margin="0,4,0,14">
+                        <TextBlock Text="Appearance" Style="{StaticResource FieldLabel}" />
+                        <ComboBox x:Name="ThemeBox" Width="220" DisplayMemberPath="Label" SelectedValuePath="Value"
+                                  SelectedValue="{Binding Theme}" />
+                    </StackPanel>
+                    <CheckBox Margin="0,0,0,10" Content="Check for a new version when VeloDM starts" IsChecked="{Binding CheckForUpdatesOnStartup}" />
+                    <TextBlock Text="Look for new versions at (a GitHub repository or an update.json address)" Style="{StaticResource FieldLabel}" Margin="0,0,0,4" />
+                    <TextBox Padding="3" Text="{Binding UpdateFeedUrl, UpdateSourceTrigger=PropertyChanged}" />
                 </StackPanel>
             </TabItem>
 
@@ -46,31 +46,50 @@
                         <RowDefinition Height="Auto" />
                         <RowDefinition Height="Auto" />
                         <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
                     </Grid.RowDefinitions>
                     <TextBlock Text="Connections per download (1–32)" Style="{StaticResource FieldLabel}" />
-                    <TextBox Grid.Column="1" Width="70" HorizontalAlignment="Left" Margin="0,0,0,10" Text="{Binding DefaultConnections}" />
+                    <TextBox Padding="3" Grid.Column="1" Width="70" HorizontalAlignment="Left" Margin="0,0,0,10" Text="{Binding DefaultConnections}" />
                     <TextBlock Grid.Row="1" Text="Downloads at once in the queue" Style="{StaticResource FieldLabel}" />
-                    <TextBox Grid.Row="1" Grid.Column="1" Width="70" HorizontalAlignment="Left" Margin="0,0,0,10" Text="{Binding MaxSimultaneousDownloads}" />
+                    <TextBox Padding="3" Grid.Row="1" Grid.Column="1" Width="70" HorizontalAlignment="Left" Margin="0,0,0,10" Text="{Binding MaxSimultaneousDownloads}" />
                     <TextBlock Grid.Row="2" Text="Retries before giving up" Style="{StaticResource FieldLabel}" />
-                    <TextBox Grid.Row="2" Grid.Column="1" Width="70" HorizontalAlignment="Left" Margin="0,0,0,10" Text="{Binding MaxRetries}" />
-                    <CheckBox Grid.Row="3" Content="Limit total speed to (KB/s)" IsChecked="{Binding SpeedLimitEnabled}" VerticalAlignment="Center" />
-                    <TextBox Grid.Row="3" Grid.Column="1" Width="90" HorizontalAlignment="Left" Margin="0,0,0,10" Text="{Binding SpeedLimitKBps}" />
+                    <TextBox Padding="3" Grid.Row="2" Grid.Column="1" Width="70" HorizontalAlignment="Left" Margin="0,0,0,10" Text="{Binding MaxRetries}" />
+                    <CheckBox Margin="0,0,0,10" Grid.Row="3" Content="Limit total speed to (KB/s)" IsChecked="{Binding SpeedLimitEnabled}" VerticalAlignment="Center" />
+                    <TextBox Padding="3" Grid.Row="3" Grid.Column="1" Width="90" HorizontalAlignment="Left" Margin="0,0,0,10" Text="{Binding SpeedLimitKBps}" />
                     <TextBlock Grid.Row="4" Text="User agent" Style="{StaticResource FieldLabel}" />
-                    <TextBox Grid.Row="4" Grid.Column="1" Margin="0,0,0,10" Text="{Binding UserAgent}" />
+                    <TextBox Padding="3" Grid.Row="4" Grid.Column="1" Margin="0,0,0,10" Text="{Binding UserAgent}" />
+                    <TextBlock Grid.Row="5" Text="Proxy" Style="{StaticResource FieldLabel}" />
+                    <ComboBox x:Name="ProxyModeBox" Grid.Row="5" Grid.Column="1" Width="220" HorizontalAlignment="Left" Margin="0,0,0,10"
+                              DisplayMemberPath="Label" SelectedValuePath="Value" SelectedValue="{Binding ProxyMode}"
+                              SelectionChanged="ProxyModeBox_SelectionChanged" />
+                    <TextBlock Grid.Row="6" Text="Proxy address" Style="{StaticResource FieldLabel}" />
+                    <TextBox Padding="3" x:Name="ProxyAddressBox" Grid.Row="6" Grid.Column="1" Margin="0,0,0,10"
+                             Text="{Binding ProxyAddress, UpdateSourceTrigger=PropertyChanged}"
+                             ToolTip="For example http://192.168.1.10:8080 or socks5://127.0.0.1:1080" />
+                    <TextBlock Grid.Row="7" Text="Proxy user name and password" Style="{StaticResource FieldLabel}" />
+                    <StackPanel x:Name="ProxyLoginPanel" Grid.Row="7" Grid.Column="1" Orientation="Horizontal" Margin="0,0,0,10">
+                        <TextBox Padding="3" Width="150" Text="{Binding ProxyUser, UpdateSourceTrigger=PropertyChanged}" />
+                        <PasswordBox x:Name="ProxyPasswordBox" Width="150" Margin="8,0,0,0" Padding="3" />
+                    </StackPanel>
+                    <TextBlock Grid.Row="8" Grid.ColumnSpan="2" TextWrapping="Wrap" Foreground="{DynamicResource MutedBrush}"
+                               Text="The proxy is used for ordinary downloads and streamed video (http://, https:// or socks5:// address). BitTorrent traffic does not go through it. The password is stored encrypted for your Windows account." />
                 </Grid>
             </TabItem>
 
             <TabItem Header="Browser">
                 <StackPanel>
-                    <CheckBox Content="Accept downloads from the VeloDM browser extension" IsChecked="{Binding BrowserIntegration}" />
+                    <CheckBox Margin="0,0,0,10" Content="Accept downloads from the VeloDM browser extension" IsChecked="{Binding BrowserIntegration}" />
                     <StackPanel Orientation="Horizontal" Margin="0,0,0,10">
                         <TextBlock Text="Local port" Style="{StaticResource FieldLabel}" />
-                        <TextBox Width="80" Text="{Binding BrowserPort}" />
-                        <TextBlock Text="(the extension popup must use the same port)" Foreground="{StaticResource MutedBrush}" Margin="8,0,0,0" VerticalAlignment="Center" />
+                        <TextBox Padding="3" Width="80" Text="{Binding BrowserPort}" />
+                        <TextBlock Text="(the extension popup must use the same port)" Foreground="{DynamicResource MutedBrush}" Margin="8,0,0,0" VerticalAlignment="Center" />
                     </StackPanel>
-                    <CheckBox Content="Ask before starting a download captured from the browser" IsChecked="{Binding ShowDialogForBrowserDownloads}" />
+                    <CheckBox Margin="0,0,0,10" Content="Ask before starting a download captured from the browser" IsChecked="{Binding ShowDialogForBrowserDownloads}" />
                     <TextBlock Text="Capture these file types from the browser and clipboard:" Style="{StaticResource FieldLabel}" Margin="0,4,0,4" />
-                    <TextBox Text="{Binding CaptureExtensions}" TextWrapping="Wrap" AcceptsReturn="True" Height="110"
+                    <TextBox Padding="3" Text="{Binding CaptureExtensions}" TextWrapping="Wrap" AcceptsReturn="True" Height="110"
                              VerticalScrollBarVisibility="Auto" />
                 </StackPanel>
             </TabItem>
@@ -78,21 +97,52 @@
             <TabItem Header="Scheduler">
                 <StackPanel>
                     <StackPanel Orientation="Horizontal">
-                        <CheckBox Content="Start the queue daily at" IsChecked="{Binding ScheduleStartEnabled}" Width="190" />
-                        <TextBox Width="70" Text="{Binding ScheduleStartTime}" Margin="0,0,0,10" VerticalAlignment="Top" />
-                        <TextBlock Text="HH:mm" Foreground="{StaticResource MutedBrush}" Margin="8,3,0,0" />
+                        <CheckBox Margin="0,0,0,10" Content="Start the queue daily at" IsChecked="{Binding ScheduleStartEnabled}" Width="190" />
+                        <TextBox Padding="3" Width="70" Text="{Binding ScheduleStartTime}" Margin="0,0,0,10" VerticalAlignment="Top" />
+                        <TextBlock Text="HH:mm" Foreground="{DynamicResource MutedBrush}" Margin="8,3,0,0" />
                     </StackPanel>
                     <StackPanel Orientation="Horizontal">
-                        <CheckBox Content="Stop the queue daily at" IsChecked="{Binding ScheduleStopEnabled}" Width="190" />
-                        <TextBox Width="70" Text="{Binding ScheduleStopTime}" Margin="0,0,0,10" VerticalAlignment="Top" />
-                        <TextBlock Text="HH:mm" Foreground="{StaticResource MutedBrush}" Margin="8,3,0,0" />
+                        <CheckBox Margin="0,0,0,10" Content="Stop the queue daily at" IsChecked="{Binding ScheduleStopEnabled}" Width="190" />
+                        <TextBox Padding="3" Width="70" Text="{Binding ScheduleStopTime}" Margin="0,0,0,10" VerticalAlignment="Top" />
+                        <TextBlock Text="HH:mm" Foreground="{DynamicResource MutedBrush}" Margin="8,3,0,0" />
                     </StackPanel>
                     <StackPanel Orientation="Horizontal" Margin="0,8,0,0">
                         <TextBlock Text="When the queue finishes" Style="{StaticResource FieldLabel}" Width="190" />
                         <ComboBox x:Name="AfterQueueBox" Width="170" SelectedItem="{Binding AfterQueue}" />
                     </StackPanel>
-                    <TextBlock Margin="0,16,0,0" TextWrapping="Wrap" Foreground="{StaticResource MutedBrush}"
+                    <TextBlock Margin="0,16,0,0" TextWrapping="Wrap" Foreground="{DynamicResource MutedBrush}"
                                Text="Use “Download Later” or “Add to queue” to put downloads in the queue. VeloDM has to be running (it can sit in the tray) for the schedule to fire." />
+                </StackPanel>
+            </TabItem>
+
+            <TabItem Header="After download">
+                <StackPanel>
+                    <CheckBox Margin="0,0,0,10" Content="Extract archives (zip, rar, 7z, tar, gz) into a folder next to the download" IsChecked="{Binding ExtractArchives}" />
+                    <CheckBox Margin="0,0,0,10" Content="Scan finished downloads for viruses" IsChecked="{Binding ScanAfterDownload}" />
+                    <TextBlock Text="Virus scanner command (leave empty to use Windows Defender)" Style="{StaticResource FieldLabel}" Margin="0,0,0,4" />
+                    <TextBox Padding="3" Text="{Binding VirusScannerCommand, UpdateSourceTrigger=PropertyChanged}" />
+                    <TextBlock TextWrapping="Wrap" Foreground="{DynamicResource MutedBrush}" Margin="0,6,0,14"
+                               Text="Example:  &quot;C:\Program Files\MyScanner\scan.exe&quot; /quiet {file}     {file} stands for the downloaded file. The scanner must finish with exit code 0 when the file is clean." />
+                    <TextBlock TextWrapping="Wrap" Foreground="{DynamicResource MutedBrush}" Margin="0,0,0,8"
+                               Text="A download that the scanner flags is left as it is (and not extracted); VeloDM shows a warning and notes the result on the download." />
+                    <TextBlock TextWrapping="Wrap" Foreground="{DynamicResource MutedBrush}"
+                               Text="To compare a download with the checksum its site publishes, right-click it and choose Verify checksum. Extract here in the same menu unpacks a single archive on demand." />
+                </StackPanel>
+            </TabItem>
+
+            <TabItem Header="Video">
+                <StackPanel>
+                    <StackPanel Orientation="Horizontal" Margin="0,0,0,14">
+                        <TextBlock Text="Preferred quality" Style="{StaticResource FieldLabel}" />
+                        <ComboBox x:Name="QualityBox" Width="220" DisplayMemberPath="Label" SelectedValuePath="Value"
+                                  SelectedValue="{Binding StreamMaxHeight}" />
+                    </StackPanel>
+                    <TextBlock x:Name="ToolsStatus" TextWrapping="Wrap" Margin="0,0,0,8" />
+                    <Button x:Name="ToolsButton" HorizontalAlignment="Left" Padding="10,4" Margin="0,0,0,14" Click="VideoTools_Click" />
+                    <TextBlock TextWrapping="Wrap" Foreground="{DynamicResource MutedBrush}" Margin="0,0,0,8"
+                               Text="Streamed video (YouTube and most video sites, HLS and DASH streams) has no single file to download. VeloDM hands these to two free, open-source programs: yt-dlp downloads the stream and FFmpeg joins picture and sound. They are downloaded from their official GitHub pages into VeloDM's data folder and are not part of VeloDM." />
+                    <TextBlock TextWrapping="Wrap" Foreground="{DynamicResource MutedBrush}"
+                               Text="Use the Download this video button the browser extension shows on a playing video, or Tasks → Add video from a web page. Copy-protected (DRM) video, as on most paid streaming services, cannot be downloaded." />
                 </StackPanel>
             </TabItem>
 
@@ -100,19 +150,19 @@
                 <StackPanel>
                     <StackPanel Orientation="Horizontal" Margin="0,0,0,10">
                         <TextBlock Text="Listening port" Style="{StaticResource FieldLabel}" Width="150" />
-                        <TextBox Width="80" Text="{Binding TorrentPort}" />
+                        <TextBox Padding="3" Width="80" Text="{Binding TorrentPort}" />
                     </StackPanel>
-                    <CheckBox Content="Find peers with DHT (needed for most magnet links)" IsChecked="{Binding TorrentDht}" />
-                    <CheckBox Content="Open the port on my router automatically (UPnP / NAT-PMP)" IsChecked="{Binding TorrentPortForwarding}" />
+                    <CheckBox Margin="0,0,0,10" Content="Find peers with DHT (needed for most magnet links)" IsChecked="{Binding TorrentDht}" />
+                    <CheckBox Margin="0,0,0,10" Content="Open the port on my router automatically (UPnP / NAT-PMP)" IsChecked="{Binding TorrentPortForwarding}" />
                     <StackPanel Orientation="Horizontal" Margin="0,0,0,10">
                         <TextBlock Text="Upload limit (KB/s, 0 = none)" Style="{StaticResource FieldLabel}" Width="150" />
-                        <TextBox Width="80" Text="{Binding TorrentUploadLimitKBps}" />
+                        <TextBox Padding="3" Width="80" Text="{Binding TorrentUploadLimitKBps}" />
                     </StackPanel>
                     <StackPanel Orientation="Horizontal">
-                        <CheckBox Content="Keep seeding after download until ratio" IsChecked="{Binding SeedAfterDownload}" Width="250" />
-                        <TextBox Width="60" Text="{Binding SeedRatioLimit}" Margin="0,0,0,10" VerticalAlignment="Top" />
+                        <CheckBox Margin="0,0,0,10" Content="Keep seeding after download until ratio" IsChecked="{Binding SeedAfterDownload}" Width="250" />
+                        <TextBox Padding="3" Width="60" Text="{Binding SeedRatioLimit}" Margin="0,0,0,10" VerticalAlignment="Top" />
                     </StackPanel>
-                    <TextBlock TextWrapping="Wrap" Foreground="{StaticResource MutedBrush}" Margin="0,4,0,10"
+                    <TextBlock TextWrapping="Wrap" Foreground="{DynamicResource MutedBrush}" Margin="0,4,0,10"
                                Text="The download speed limit also applies to torrents. Port changes apply the next time VeloDM starts a torrent." />
                     <Button Content="Open magnet links and .torrent files with VeloDM" HorizontalAlignment="Left" Padding="10,4"
                             Click="Associate_Click" />

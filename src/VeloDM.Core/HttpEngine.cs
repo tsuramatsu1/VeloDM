@@ -15,6 +15,51 @@ public static class HttpEngine
 
     public static readonly TimeSpan ProbeTimeout = TimeSpan.FromSeconds(30);
 
+    /// <summary>The proxy every request goes through; follows the Options setting without recreating the client.</summary>
+    private static readonly SwitchableProxy Proxy = new();
+
+    private static readonly string[] ProxySchemes = ["http", "https", "socks4", "socks4a", "socks5"];
+
+    public static bool IsValidProxyAddress(string? address) =>
+        Uri.TryCreate(address?.Trim(), UriKind.Absolute, out var u)
+        && Array.IndexOf(ProxySchemes, u.Scheme) >= 0 && u.Host.Length > 0;
+
+    /// <summary>The proxy for these settings: null means a direct connection.</summary>
+    public static IWebProxy? BuildProxy(AppSettings settings)
+    {
+        switch (settings.ProxyMode)
+        {
+            case ProxyMode.None:
+                return null;
+            case ProxyMode.Custom when IsValidProxyAddress(settings.ProxyAddress):
+                var proxy = new WebProxy(new Uri(settings.ProxyAddress.Trim())) { BypassProxyOnLocal = true };
+                if (!string.IsNullOrEmpty(settings.ProxyUser))
+                    proxy.Credentials = new NetworkCredential(settings.ProxyUser, settings.ProxyPassword);
+                return proxy;
+            default:
+                return HttpClient.DefaultProxy; // whatever Windows is set to use
+        }
+    }
+
+    public static void ConfigureProxy(AppSettings settings) => Proxy.Use(BuildProxy(settings));
+
+    /// <summary>
+    /// The same choice as a URL for helper programs (user and password included), "" for a
+    /// direct connection, or null to leave them on the system default.
+    /// </summary>
+    public static string? ProxyUrlForTools(AppSettings settings)
+    {
+        if (settings.ProxyMode == ProxyMode.None) return "";
+        if (settings.ProxyMode != ProxyMode.Custom || !IsValidProxyAddress(settings.ProxyAddress)) return null;
+        var builder = new UriBuilder(settings.ProxyAddress.Trim());
+        if (!string.IsNullOrEmpty(settings.ProxyUser))
+        {
+            builder.UserName = Uri.EscapeDataString(settings.ProxyUser);
+            builder.Password = Uri.EscapeDataString(settings.ProxyPassword);
+        }
+        return builder.Uri.AbsoluteUri.TrimEnd('/');
+    }
+
     /// <summary>
     /// One shared client. Decompression is off because byte ranges refer to the encoded
     /// body, and HTTP/1.1 is used so each segment really gets its own TCP connection.
@@ -26,6 +71,8 @@ public static class HttpEngine
         MaxAutomaticRedirections = 20,
         MaxConnectionsPerServer = 128,
         UseCookies = false,
+        UseProxy = true,
+        Proxy = Proxy,
         ConnectTimeout = TimeSpan.FromSeconds(20),
         PooledConnectionLifetime = TimeSpan.FromMinutes(5),
     })
@@ -102,4 +149,22 @@ public static class HttpEngine
             throw new TimeoutException("The server did not respond in time.");
         }
     }
+}
+
+/// <summary>An <see cref="IWebProxy"/> whose target can be swapped while the client is in use.</summary>
+internal sealed class SwitchableProxy : IWebProxy
+{
+    private volatile IWebProxy? _inner = HttpClient.DefaultProxy;
+
+    public void Use(IWebProxy? proxy) => _inner = proxy;
+
+    public ICredentials? Credentials
+    {
+        get => _inner?.Credentials;
+        set { }
+    }
+
+    public Uri? GetProxy(Uri destination) => _inner?.GetProxy(destination);
+
+    public bool IsBypassed(Uri host) => _inner is not { } proxy || proxy.IsBypassed(host);
 }

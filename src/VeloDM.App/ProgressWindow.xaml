@@ -3,13 +3,13 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:local="clr-namespace:VeloDM.App"
         Width="600" Height="500" MinWidth="480" MinHeight="380"
-        WindowStartupLocation="CenterScreen" Background="White">
+        WindowStartupLocation="CenterScreen" Background="{DynamicResource WindowBrush}" Foreground="{DynamicResource TextBrush}">
     <DockPanel Margin="16">
         <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,12,0,0">
-            <Button x:Name="OpenButton" Content="_Open" Style="{StaticResource DialogButton}" Click="Open_Click" Visibility="Collapsed" />
-            <Button Content="Open _folder" Style="{StaticResource DialogButton}" Click="OpenFolder_Click" />
-            <Button x:Name="PauseButton" Content="_Pause" Style="{StaticResource DialogButton}" Click="PauseResume_Click" />
-            <Button Content="_Close" Style="{StaticResource DialogButton}" IsCancel="True" Click="Close_Click" />
+            <Button x:Name="OpenButton" Content="_Open" Style="{DynamicResource DialogButton}" Click="Open_Click" Visibility="Collapsed" />
+            <Button Content="Open _folder" Style="{DynamicResource DialogButton}" Click="OpenFolder_Click" />
+            <Button x:Name="PauseButton" Content="_Pause" Style="{DynamicResource DialogButton}" Click="PauseResume_Click" />
+            <Button Content="_Close" Style="{DynamicResource DialogButton}" IsCancel="True" Click="Close_Click" />
         </StackPanel>
 
         <Grid DockPanel.Dock="Top">
@@ -49,7 +49,7 @@
             <TextBlock Grid.Row="4" Grid.Column="1" Style="{StaticResource Value}" Text="{Binding DownloadedText}" />
             <TextBlock Grid.Row="5" Text="Transfer rate" />
             <TextBlock Grid.Row="5" Grid.Column="1" Style="{StaticResource Value}">
-                <Run Text="{Binding SpeedText, Mode=OneWay}" /><Run Text="     Time left: " Foreground="{StaticResource MutedBrush}" /><Run Text="{Binding EtaText, Mode=OneWay}" />
+                <Run Text="{Binding SpeedText, Mode=OneWay}" /><Run Text="     Time left: " Foreground="{DynamicResource MutedBrush}" /><Run Text="{Binding EtaText, Mode=OneWay}" />
             </TextBlock>
             <TextBlock Grid.Row="6" Text="Resume capability" />
             <TextBlock Grid.Row="6" Grid.Column="1" Style="{StaticResource Value}" Text="{Binding ResumeText}" />
@@ -58,22 +58,30 @@
         </Grid>
 
         <ProgressBar DockPanel.Dock="Top" Height="18" Margin="0,8,0,6" Maximum="100" Value="{Binding Progress, Mode=OneWay}"
-                     Foreground="#3A8DF0" Background="#E8ECF1" BorderThickness="0" />
+                     BorderThickness="0" />
         <local:SegmentBar x:Name="SegBar" DockPanel.Dock="Top" Height="14" Margin="0,0,0,10"
                           ToolTip="HTTP: each block is a range of the file and dark marks are live connections. Torrent: pieces you already have." />
 
         <Grid>
-        <ListView x:Name="FilesList" BorderBrush="{StaticResource BorderBrush}" Visibility="Collapsed">
+        <ListView x:Name="FilesList" BorderBrush="{DynamicResource BorderBrush}" Visibility="Collapsed">
             <ListView.View>
                 <GridView>
-                    <GridViewColumn Header="File" Width="290" DisplayMemberBinding="{Binding Path}" />
+                    <GridViewColumn Header="File (untick to skip)" Width="300">
+                        <GridViewColumn.CellTemplate>
+                            <DataTemplate>
+                                <CheckBox IsChecked="{Binding Wanted, Mode=TwoWay}" Content="{Binding Path}" ToolTip="{Binding Path}"
+                                          Click="FileWanted_Click" />
+                            </DataTemplate>
+                        </GridViewColumn.CellTemplate>
+                    </GridViewColumn>
                     <GridViewColumn Header="Size" Width="90" DisplayMemberBinding="{Binding SizeText}" />
                     <GridViewColumn Header="Done" Width="70" DisplayMemberBinding="{Binding PercentText}" />
-                    <GridViewColumn Header="Priority" Width="80" DisplayMemberBinding="{Binding Priority}" />
                 </GridView>
             </ListView.View>
         </ListView>
-        <ListView x:Name="ConnectionList" BorderBrush="{StaticResource BorderBrush}">
+        <TextBlock x:Name="DetailNote" TextWrapping="Wrap" Foreground="{DynamicResource MutedBrush}" VerticalAlignment="Top"
+                   Margin="2,6,2,0" Visibility="Collapsed" />
+        <ListView x:Name="ConnectionList" BorderBrush="{DynamicResource BorderBrush}">
             <ListView.View>
                 <GridView>
                     <GridViewColumn Header="N." Width="40" DisplayMemberBinding="{Binding Index}" />

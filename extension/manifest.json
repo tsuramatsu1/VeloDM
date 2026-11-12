@@ -1,10 +1,10 @@
 {
   "manifest_version": 3,
   "name": "VeloDM Integration",
-  "version": "1.4.0",
+  "version": "1.5.0",
   "description": "Hands browser downloads, magnet links and playing videos to the VeloDM download manager.",
   "icons": { "16": "icons/icon16.png", "32": "icons/icon32.png", "48": "icons/icon48.png", "128": "icons/icon128.png" },
-  "permissions": ["downloads", "contextMenus", "cookies", "storage"],
+  "permissions": ["downloads", "contextMenus", "cookies", "storage", "webRequest"],
   "host_permissions": ["<all_urls>"],
   "background": { "service_worker": "background.js" },
   "content_scripts": [

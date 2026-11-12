@@ -1,0 +1,29 @@
+<Window x:Class="VeloDM.App.ChecksumWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Verify checksum" Width="640" SizeToContent="Height" ResizeMode="NoResize"
+        WindowStartupLocation="CenterOwner" Background="{DynamicResource WindowBrush}" Foreground="{DynamicResource TextBrush}">
+    <StackPanel Margin="18">
+        <TextBlock x:Name="FileText" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" Margin="0,0,0,12" />
+
+        <TextBlock Text="Checksum published by the download site (optional)" Style="{StaticResource FieldLabel}" Margin="0,0,0,4" />
+        <TextBox x:Name="ExpectedBox" Padding="4" FontFamily="Consolas" TextChanged="ExpectedBox_TextChanged" />
+
+        <StackPanel Orientation="Horizontal" Margin="0,12,0,0">
+            <TextBlock Text="Type" Style="{StaticResource FieldLabel}" />
+            <ComboBox x:Name="AlgorithmBox" Width="110" SelectionChanged="AlgorithmBox_SelectionChanged" />
+        </StackPanel>
+
+        <TextBlock Text="Checksum of the downloaded file" Style="{StaticResource FieldLabel}" Margin="0,12,0,4" />
+        <TextBox x:Name="ActualBox" Padding="4" FontFamily="Consolas" IsReadOnly="True" TextWrapping="Wrap" />
+        <ProgressBar x:Name="Progress" Height="6" Margin="0,6,0,0" Maximum="100" BorderThickness="0"
+                     />
+
+        <TextBlock x:Name="ResultText" Margin="0,12,0,0" FontWeight="SemiBold" TextWrapping="Wrap" />
+
+        <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,16,0,0">
+            <Button x:Name="CopyButton" Content="_Copy" Style="{DynamicResource DialogButton}" Click="Copy_Click" IsEnabled="False" />
+            <Button Content="Close" Style="{DynamicResource DialogButton}" IsCancel="True" IsDefault="True" Click="Close_Click" />
+        </StackPanel>
+    </StackPanel>
+</Window>

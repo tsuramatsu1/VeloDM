@@ -22,6 +22,7 @@ public partial class MainWindow : Window
     private readonly ListCollectionView _view;
     private readonly Dictionary<Guid, ProgressWindow> _progressWindows = new();
     private ClipboardMonitor? _clipboard;
+    private RefreshAddressWindow? _refreshWindow;
     private bool _closingForExit;
     private bool _trayHintShown;
 
@@ -78,7 +79,7 @@ public partial class MainWindow : Window
 
     // ---- adding downloads ------------------------------------------------------------------
 
-    public void ShowAddDialog(BridgeRequest? request)
+    public void ShowAddDialog(BridgeRequest? request, bool video = false)
     {
         if (request is null && TryGetClipboardUrl() is { } clip)
             request = new BridgeRequest(clip);
@@ -91,10 +92,11 @@ public partial class MainWindow : Window
             if (answer != MessageBoxResult.Yes) return;
         }
 
-        var dialog = new AddDownloadWindow(_manager, request);
+        var dialog = new AddDownloadWindow(_manager, request, video);
         if (IsVisible) dialog.Owner = this;
         else dialog.Topmost = true;
         if (dialog.ShowDialog() != true || dialog.Result is not { } item) return;
+        if (item.IsStream && !VideoToolsWindow.EnsureInstalled(IsVisible ? this : null, _manager)) return;
 
         if (!dialog.StartNow) item.InQueue = true;
         _manager.Add(item, dialog.StartNow);
@@ -103,10 +105,21 @@ public partial class MainWindow : Window
 
     public void HandleExternalRequest(BridgeRequest request)
     {
+        // A download captured while "Refresh download address" is open is the fresh link it is waiting for.
+        if (_refreshWindow is { } refresh && !request.Stream && App.IsHttpUrl(request.Url) && !TorrentSources.IsTorrent(request.Url))
+        {
+            refresh.OfferCaptured(request);
+            return;
+        }
         // Torrents always go through the dialog: it reads the metadata and checks for duplicates.
         if (_manager.Settings.ShowDialogForBrowserDownloads || TorrentSources.IsTorrent(request.Url))
         {
-            ShowAddDialog(request);
+            ShowAddDialog(request, request.Stream);
+            return;
+        }
+        if (request.Stream)
+        {
+            AddStream(request);
             return;
         }
         var name = !string.IsNullOrWhiteSpace(request.FileName)
@@ -127,6 +140,30 @@ public partial class MainWindow : Window
         _manager.Add(item, startNow: true);
         if (_manager.Settings.ShowProgressWindow) OpenProgress(item);
         else App.Current.Balloon("Download started", item.FileName);
+    }
+
+    private void AddStream(BridgeRequest request)
+    {
+        if (!VideoToolsWindow.EnsureInstalled(IsVisible ? this : null, _manager)) return;
+        const string category = "Video";
+        var item = new DownloadItem
+        {
+            Kind = DownloadKind.Stream,
+            Url = request.Url!,
+            ManifestUrl = request.ManifestUrl,
+            Referrer = request.Referrer,
+            Cookies = request.Cookies,
+            UserAgent = request.UserAgent,
+            Category = category,
+            SaveDirectory = Categories.FolderFor(_manager.Settings, category),
+            ResumeSupported = true,
+        };
+        // Without a title from the browser the file is named after the video once its page has been read.
+        if (!string.IsNullOrWhiteSpace(request.Title))
+            item.FileName = FileNameHelper.MakeUnique(item.SaveDirectory, FileNameHelper.Sanitize(request.Title) + ".mp4");
+        _manager.Add(item, startNow: true);
+        if (_manager.Settings.ShowProgressWindow) OpenProgress(item);
+        else App.Current.Balloon("Video download started", string.IsNullOrEmpty(item.FileName) ? item.Url : item.FileName);
     }
 
     private void OnClipboardText(string text)
@@ -176,6 +213,7 @@ public partial class MainWindow : Window
     // ---- commands ---------------------------------------------------------------------
 
     private void AddUrl_Click(object sender, RoutedEventArgs e) => ShowAddDialog(null);
+    private void AddVideo_Click(object sender, RoutedEventArgs e) => ShowAddDialog(null, video: true);
 
     private void AddTorrent_Click(object sender, RoutedEventArgs e)
     {
@@ -305,6 +343,83 @@ public partial class MainWindow : Window
         else Clipboard.SetText(item.Url);
     }
 
+    private void RefreshAddress_Click(object sender, RoutedEventArgs e)
+    {
+        if (Selected.FirstOrDefault() is not { } item) return;
+        if (item.Kind != DownloadKind.Http || item.IsCompleted)
+        {
+            Info(item.IsCompleted
+                ? "This download is already complete."
+                : "Only ordinary (HTTP) downloads have an address to refresh. For a torrent or a video, use Resume or Redownload.");
+            return;
+        }
+        if (_refreshWindow is not null)
+        {
+            _refreshWindow.Activate();
+            return;
+        }
+        _refreshWindow = new RefreshAddressWindow(_manager, item) { Owner = this };
+        _refreshWindow.Closed += (_, _) => _refreshWindow = null;
+        _refreshWindow.Show();
+    }
+
+    private void ItemSpeedLimit_Click(object sender, RoutedEventArgs e)
+    {
+        var items = Selected.Where(i => !i.IsCompleted).ToList();
+        if (items.Count == 0) return;
+        var dialog = new InputDialog("Speed limit",
+            "Limit for the selected download(s) in KB/s. Enter 0 for no limit of their own." +
+            (items.Any(i => i.IsStream) ? "\n\nFor a video that is already downloading, the new limit applies after a pause and resume." : ""),
+            items[0].SpeedLimitKBps.ToString()) { Owner = this };
+        if (dialog.ShowDialog() != true) return;
+        if (!int.TryParse(dialog.Value, out int limit) || limit < 0 || limit > 10_000_000)
+        {
+            Info("Enter a whole number of KB/s, or 0 for no limit.");
+            return;
+        }
+        foreach (var item in items) item.SpeedLimitKBps = limit;
+        _manager.Save();
+    }
+
+    private void Checksum_Click(object sender, RoutedEventArgs e)
+    {
+        if (Selected.FirstOrDefault() is not { } item) return;
+        if (!item.IsCompleted || !File.Exists(item.FullPath))
+        {
+            Info(item.IsCompleted
+                ? "A checksum can be calculated for a single file. This download is a folder or the file has been moved."
+                : "The checksum can be verified once the download is complete.");
+            return;
+        }
+        new ChecksumWindow(item.FullPath) { Owner = this }.ShowDialog();
+    }
+
+    private async void Extract_Click(object sender, RoutedEventArgs e)
+    {
+        if (Selected.FirstOrDefault() is not { } item) return;
+        if (!item.IsCompleted || !File.Exists(item.FullPath) || !PostProcessor.IsArchive(item.FullPath))
+        {
+            Info("Extract here works on a finished download that is an archive (zip, rar, 7z, tar, gz…).");
+            return;
+        }
+        try
+        {
+            var folder = await System.Threading.Tasks.Task.Run(() => PostProcessor.Extract(item.FullPath));
+            item.Note = "Extracted to " + Path.GetFileName(folder);
+            _manager.Save();
+            Process.Start("explorer.exe", $"\"{folder}\"");
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show(this, "Could not extract the archive: " + ex.Message, "VeloDM", MessageBoxButton.OK, MessageBoxImage.Warning);
+        }
+    }
+
+    private void Info(string message) =>
+        MessageBox.Show(this, message, "VeloDM", MessageBoxButton.OK, MessageBoxImage.Information);
+
+    private async void CheckUpdates_Click(object sender, RoutedEventArgs e) => await App.Current.CheckForUpdatesAsync(silent: false);
+
     private void Properties_Click(object sender, RoutedEventArgs e)
     {
         if (Selected.FirstOrDefault() is { } item) OpenProgress(item);
@@ -345,6 +460,7 @@ public partial class MainWindow : Window
         _manager.ApplySettings(dialog.Settings);
         if (old.BrowserIntegration != dialog.Settings.BrowserIntegration || old.BrowserPort != dialog.Settings.BrowserPort)
             App.Current.RestartBridge();
+        if (old.Theme != dialog.Settings.Theme) ThemeManager.Apply(dialog.Settings.Theme);
         SpeedLimitMenu.IsChecked = dialog.Settings.SpeedLimitEnabled;
         UpdateStatusBar();
     }
@@ -355,9 +471,10 @@ public partial class MainWindow : Window
 
     private void About_Click(object sender, RoutedEventArgs e) =>
         MessageBox.Show(this,
-            "VeloDM 1.2\n\nMulti-connection download manager with dynamic segmentation, resume, queue, scheduler, " +
-            "speed limiter, BitTorrent (magnet links and .torrent files) and browser integration.\n\n" +
-            "BitTorrent support uses MonoTorrent (MIT licence).\n\nData folder:\n" + _manager.DataDirectory,
+            $"VeloDM {App.CurrentVersion.ToString(3)}\n\nMulti-connection download manager with dynamic segmentation, resume, queue, " +
+            "scheduler, speed limiter, BitTorrent (magnet links and .torrent files), streamed video and browser integration.\n\n" +
+            "BitTorrent support uses MonoTorrent and archive extraction uses SharpCompress (both MIT licence). " +
+            "Streamed video is downloaded by yt-dlp and FFmpeg, which are separate programs.\n\nData folder:\n" + _manager.DataDirectory,
             "About VeloDM", MessageBoxButton.OK, MessageBoxImage.Information);
 
     private void Exit_Click(object sender, RoutedEventArgs e) => App.Current.ExitApp();
@@ -392,6 +509,7 @@ public partial class MainWindow : Window
     {
         _closingForExit = true;
         foreach (var w in _progressWindows.Values.ToList()) w.Close();
+        _refreshWindow?.Close();
         Close();
     }
 

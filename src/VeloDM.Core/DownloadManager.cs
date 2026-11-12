@@ -22,6 +22,7 @@ public sealed class DownloadManager : IDisposable
     private int _inTick;
     private DateOnly? _lastScheduledStart, _lastScheduledStop;
     private bool _disposed;
+    private readonly CancellationTokenSource _shutdown = new();
 
     public ObservableCollection<DownloadItem> Items { get; } = new();
     public AppSettings Settings { get; private set; }
@@ -36,6 +37,11 @@ public sealed class DownloadManager : IDisposable
 
     public event Action<DownloadItem>? DownloadCompleted;
     public event Action<DownloadItem>? DownloadFailed;
+    /// <summary>Raised when the after-download steps (virus scan, unpacking) of an item have finished.</summary>
+    public event Action<DownloadItem, PostProcessResult>? PostProcessed;
+
+    /// <summary>Finds yt-dlp and FFmpeg for streamed video; null when they are not installed.</summary>
+    public Func<VideoToolPaths?> LocateVideoTools { get; set; }
     public event Action? QueueStateChanged;
     public event Action? QueueFinished;
     public event Action? Ticked;
@@ -48,6 +54,8 @@ public sealed class DownloadManager : IDisposable
         _settingsPath = Path.Combine(DataDirectory, "settings.json");
         Settings = AppSettings.Load(_settingsPath);
         Limiter.Limit = Settings.SpeedLimitBytes;
+        HttpEngine.ConfigureProxy(Settings);
+        LocateVideoTools = () => VideoTools.Locate(DataDirectory);
         Torrents = new TorrentService(Path.Combine(DataDirectory, "torrents"), () => Settings);
         _timer = new Timer(OnTick, null, 500, 500);
     }
@@ -102,6 +110,7 @@ public sealed class DownloadManager : IDisposable
     {
         Settings = settings;
         Limiter.Limit = settings.SpeedLimitBytes;
+        HttpEngine.ConfigureProxy(settings);
         settings.Save(_settingsPath);
         _ = Torrents.ApplySettingsAsync(settings).ContinueWith(t => _ = t.Exception, TaskContinuationOptions.OnlyOnFaulted);
         PumpQueue();
@@ -146,7 +155,12 @@ public sealed class DownloadManager : IDisposable
         lock (_sync)
         {
             if (_disposed || _running.ContainsKey(item.Id) || item.Status == DownloadStatus.Completed) return;
-            job = item.IsTorrent ? new TorrentTask(item, this, Torrents) : new DownloadTask(item, this);
+            job = item.Kind switch
+            {
+                DownloadKind.Torrent => new TorrentTask(item, this, Torrents),
+                DownloadKind.Stream => new StreamTask(item, this),
+                _ => new DownloadTask(item, this),
+            };
             _running[item.Id] = job;
             job.Start();
         }
@@ -178,6 +192,8 @@ public sealed class DownloadManager : IDisposable
         await StopAndWaitAsync(item);
         if (item.IsTorrent)
             await Torrents.RemoveAsync(item, deleteData: true);
+        else if (item.IsStream)
+            StreamTask.DeletePartialFiles(item);
         else
             TryDelete(item.TempPath);
         item.ResetProgress();
@@ -198,8 +214,48 @@ public sealed class DownloadManager : IDisposable
                 await Torrents.RemoveAsync(item, deleteFiles);
                 continue;
             }
-            TryDelete(item.TempPath);
+            if (item.IsStream) StreamTask.DeletePartialFiles(item);
+            else TryDelete(item.TempPath);
             if (deleteFiles && item.IsCompleted) TryDelete(item.FullPath);
+        }
+        Save();
+    }
+
+    /// <summary>
+    /// Points an unfinished download at a new address (for links that expire) and keeps what is
+    /// already on disk. The download is stopped first; the caller decides whether to start it again.
+    /// </summary>
+    public async Task UpdateAddressAsync(DownloadItem item, string url, string? referrer, string? cookies, string? userAgent)
+    {
+        if (item.Kind != DownloadKind.Http) throw new InvalidOperationException("Only HTTP downloads have an address to refresh.");
+        await StopAndWaitAsync(item);
+        item.Url = url;
+        if (!string.IsNullOrWhiteSpace(referrer)) item.Referrer = referrer;
+        if (!string.IsNullOrWhiteSpace(cookies)) item.Cookies = cookies;
+        if (!string.IsNullOrWhiteSpace(userAgent)) item.UserAgent = userAgent;
+        item.ErrorMessage = null;
+        if (item.Status == DownloadStatus.Error) item.Status = DownloadStatus.Paused;
+        Save();
+    }
+
+    /// <summary>
+    /// Chooses which files of a torrent are downloaded. A finished torrent that gains files
+    /// goes back to downloading.
+    /// </summary>
+    public async Task SetSkippedFilesAsync(DownloadItem item, IReadOnlyCollection<string> skipped)
+    {
+        if (!item.IsTorrent) throw new InvalidOperationException("Only torrents have a file selection.");
+        bool addsFiles = item.SkippedFiles.Any(path => !skipped.Contains(path, StringComparer.OrdinalIgnoreCase));
+        bool resume = item.IsCompleted && addsFiles;
+        if (resume) await StopAndWaitAsync(item);
+
+        item.SkippedFiles = skipped.ToList();
+        await Torrents.ApplyFileSelectionAsync(item);
+        if (resume)
+        {
+            item.Status = DownloadStatus.Paused;
+            item.DateCompleted = null;
+            Start(item);
         }
         Save();
     }
@@ -227,7 +283,36 @@ public sealed class DownloadManager : IDisposable
     {
         try { Save(); } catch (IOException) { }
         DownloadCompleted?.Invoke(item);
+        StartPostProcessing(item);
         PumpQueue();
+    }
+
+    /// <summary>Runs the virus scan and unpacking in the background; the queue does not wait for them.</summary>
+    private void StartPostProcessing(DownloadItem item)
+    {
+        var settings = Settings;
+        if (!settings.ScanAfterDownload && !settings.ExtractArchives) return;
+        var ct = _shutdown.Token;
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                // A seeding torrent keeps showing its own state.
+                var result = await PostProcessor.RunAsync(item, settings, phase => { if (!item.IsTorrent) item.Phase = phase; }, ct)
+                    .ConfigureAwait(false);
+                item.Note = result.Note;
+                try { Save(); } catch (IOException) { }
+                PostProcessed?.Invoke(item, result);
+            }
+            catch (OperationCanceledException)
+            {
+                // The app is closing.
+            }
+            catch (Exception ex)
+            {
+                item.Note = "After-download steps failed: " + ex.Message;
+            }
+        }, CancellationToken.None);
     }
 
     private void OnJobEnded(IDownloadJob job)
@@ -236,7 +321,11 @@ public sealed class DownloadManager : IDisposable
         Release(job);
         try { Save(); } catch (IOException) { }
 
-        if (item.Status == DownloadStatus.Completed && !job.CompletionReported) DownloadCompleted?.Invoke(item);
+        if (item.Status == DownloadStatus.Completed && !job.CompletionReported)
+        {
+            DownloadCompleted?.Invoke(item);
+            StartPostProcessing(item);
+        }
         else if (item.Status == DownloadStatus.Error) DownloadFailed?.Invoke(item);
         PumpQueue();
     }
@@ -385,6 +474,7 @@ public sealed class DownloadManager : IDisposable
             jobs = _running.Values.ToArray();
         }
         _timer.Dispose();
+        _shutdown.Cancel();
         foreach (var j in jobs) j.Cancel();
         try { Task.WaitAll(jobs.Select(j => j.Completion).ToArray(), TimeSpan.FromSeconds(8)); } catch { }
         Torrents.Dispose();

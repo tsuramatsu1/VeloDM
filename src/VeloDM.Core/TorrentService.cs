@@ -70,11 +70,38 @@ public sealed class TorrentService : IDisposable
                 manager = await engine.AddAsync(torrent, item.SaveDirectory, settings).ConfigureAwait(false);
             }
             item.InfoHash = TorrentSources.HashOf(manager.InfoHashes);
+            await ApplyFileSelectionAsync(item, manager).ConfigureAwait(false);
             return manager;
         }
         finally
         {
             _gate.Release();
+        }
+    }
+
+    /// <summary>Applies <see cref="DownloadItem.SkippedFiles"/> to a torrent the engine already knows.</summary>
+    internal async Task ApplyFileSelectionAsync(DownloadItem item)
+    {
+        await _gate.WaitAsync().ConfigureAwait(false);
+        try
+        {
+            if (Find(item) is { } manager) await ApplyFileSelectionAsync(item, manager).ConfigureAwait(false);
+        }
+        finally
+        {
+            _gate.Release();
+        }
+    }
+
+    /// <summary>Does nothing until the file list is known (a magnet link still fetching its metadata).</summary>
+    internal static async Task ApplyFileSelectionAsync(DownloadItem item, TorrentManager manager)
+    {
+        if (!manager.HasMetadata) return;
+        var skipped = new HashSet<string>(item.SkippedFiles, StringComparer.OrdinalIgnoreCase);
+        foreach (var file in manager.Files)
+        {
+            var wanted = skipped.Contains(file.Path) ? Priority.DoNotDownload : Priority.Normal;
+            if (file.Priority != wanted) await manager.SetFilePriorityAsync(file, wanted).ConfigureAwait(false);
         }
     }
 

@@ -1,0 +1,32 @@
+<Window x:Class="VeloDM.App.RefreshAddressWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Refresh download address" Width="640" SizeToContent="Height" ResizeMode="NoResize"
+        WindowStartupLocation="CenterOwner" Background="{DynamicResource WindowBrush}" Foreground="{DynamicResource TextBrush}">
+    <StackPanel Margin="18">
+        <TextBlock x:Name="FileText" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" Margin="0,0,0,8" />
+        <TextBlock TextWrapping="Wrap" Foreground="{DynamicResource MutedBrush}" Margin="0,0,0,12"
+                   Text="Some sites hand out download links that stop working after a while. Get a fresh link for the same file and VeloDM carries on from where it stopped, keeping what is already downloaded." />
+
+        <Border Background="{DynamicResource SidebarBrush}" CornerRadius="4" Padding="12,10" Margin="0,0,0,12">
+            <StackPanel>
+                <TextBlock TextWrapping="Wrap"
+                           Text="1.  Open the page you downloaded from and start the download there again. With the browser extension installed, VeloDM catches the new link and fills it in below." />
+                <Button x:Name="OpenPageButton" Content="Open the download page" HorizontalAlignment="Left" Padding="10,4"
+                        Margin="18,8,0,8" Click="OpenPage_Click" />
+                <TextBlock TextWrapping="Wrap" Text="2.  Or copy the new link yourself and paste it here:" />
+            </StackPanel>
+        </Border>
+
+        <TextBlock Text="New address" Style="{StaticResource FieldLabel}" Margin="0,0,0,4" />
+        <TextBox x:Name="UrlBox" Padding="4" TextChanged="UrlBox_TextChanged" />
+        <TextBlock x:Name="StatusText" TextWrapping="Wrap" Foreground="{DynamicResource MutedBrush}" Margin="0,8,0,0"
+                   Text="Waiting for a new link…" />
+
+        <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,16,0,0">
+            <Button x:Name="UseButton" Content="_Use this address and resume" Style="{DynamicResource DialogButton}" IsDefault="True"
+                    IsEnabled="False" Click="Use_Click" />
+            <Button Content="Cancel" Style="{DynamicResource DialogButton}" IsCancel="True" Click="Cancel_Click" />
+        </StackPanel>
+    </StackPanel>
+</Window>

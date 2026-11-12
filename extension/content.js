@@ -1,7 +1,10 @@
 // Shows a small "Download this video" pill over a playing video or audio element, like IDM's
-// download panel. It appears for media served as a plain file (an http/https source), and on
-// X and Facebook, where page-hook.js finds the plain .mp4 version of the stream being played.
-// Other chunked streams (blob: sources, e.g. YouTube) have no single file, so no pill is shown.
+// download panel. Three cases:
+//   - media served as a plain file (an http/https source): that file is sent to VeloDM;
+//   - X and Facebook: page-hook.js finds the plain .mp4 version of the stream being played;
+//   - any other chunked stream (blob: sources, e.g. YouTube, HLS/DASH players): the page address is
+//     sent and VeloDM downloads the video with its video tools (yt-dlp).
+// Copy-protected (DRM) video cannot be downloaded, so no pill is shown for it.
 
 (() => {
   if (window.__velodmPill) return;
@@ -9,6 +12,7 @@
 
   const MIN_WIDTH = 200;
   const MIN_HEIGHT = 110;
+  const MIN_STREAM_SECONDS = 20; // short looping clips and animated previews are not worth a pill
   const dismissed = new WeakSet();
   let enabled = true;
   let current = null; // the media element the pill is attached to
@@ -105,6 +109,19 @@
     return candidates.find((u) => /^https?:/i.test(u || "")) || sniffedUrl(el);
   }
 
+  // A chunked stream: the player feeds the element from script, so there is no file address to send.
+  function isStream(el) {
+    if (el.tagName !== "VIDEO" || el.mediaKeys) return false;
+    const src = el.currentSrc || el.src || "";
+    if (src && !/^(blob|mediasource):/i.test(src)) return false;
+    if (!src && !el.srcObject) return false;
+    return !(el.duration < MIN_STREAM_SECONDS); // unknown and live durations pass
+  }
+
+  function downloadable(el) {
+    return !!mediaUrl(el) || isStream(el);
+  }
+
   function fileNameFor(el, url) {
     let ext = "";
     try {
@@ -142,7 +159,7 @@
   }
 
   function show(el) {
-    if (!enabled || dismissed.has(el) || !mediaUrl(el)) return;
+    if (!enabled || dismissed.has(el) || !downloadable(el)) return;
     if (!pillHost) build();
     current = el;
     label.textContent = el.tagName === "AUDIO" ? "Download this audio" : "Download this video";
@@ -158,7 +175,7 @@
   }
 
   function place() {
-    if (!current || !current.isConnected || !mediaUrl(current)) return hide();
+    if (!current || !current.isConnected || !downloadable(current)) return hide();
     const r = current.getBoundingClientRect();
     const isAudio = current.tagName === "AUDIO";
     const visible = r.bottom > 0 && r.top < innerHeight && r.right > 0 && r.left < innerWidth &&
@@ -175,11 +192,15 @@
 
   function download() {
     const el = current;
-    const url = el && mediaUrl(el);
-    if (!url) return;
+    if (!el) return;
+    const url = mediaUrl(el);
+    if (!url && !isStream(el)) return;
     const original = label.textContent;
+    const title = (document.title || "").trim().slice(0, 150);
     chrome.runtime.sendMessage(
-      { type: "download", url, referrer: location.href, fileName: fileNameFor(el, url) },
+      url
+        ? { type: "download", url, referrer: location.href, fileName: fileNameFor(el, url) }
+        : { type: "stream", title },
       (reply) => {
         const ok = !chrome.runtime.lastError && reply && reply.ok;
         label.textContent = ok ? "Sent to VeloDM" : "VeloDM is not running";

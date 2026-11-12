@@ -28,7 +28,12 @@ public partial class App : Application
 
         // A URL, magnet link or .torrent file (from file/protocol associations or the command line).
         string? url = e.Args.FirstOrDefault(a => IsHttpUrl(a) || TorrentSources.IsMagnet(a) || TorrentSources.IsTorrentFile(a));
-        _mutex = new Mutex(true, "VeloDM.SingleInstance." + Environment.UserName, out bool firstInstance);
+        // VELODM_DATA runs a separate copy with its own settings and download list (portable use, testing).
+        string? dataDirectory = Environment.GetEnvironmentVariable("VELODM_DATA");
+        if (string.IsNullOrWhiteSpace(dataDirectory) || !System.IO.Path.IsPathFullyQualified(dataDirectory)) dataDirectory = null;
+        _dataDirectory = dataDirectory ?? DownloadManager.DefaultDataDirectory;
+        string instance = dataDirectory is null ? "" : "." + ((uint)StringComparer.OrdinalIgnoreCase.GetHashCode(dataDirectory)).ToString("x");
+        _mutex = new Mutex(true, "VeloDM.SingleInstance." + Environment.UserName + instance, out bool firstInstance);
         if (!firstInstance)
         {
             ForwardToRunningInstance(url);
@@ -44,12 +49,18 @@ public partial class App : Application
         };
         DispatcherUnhandledException += OnUnhandledException;
 
-        Manager = new DownloadManager();
+        Manager = new DownloadManager(_dataDirectory);
         Manager.LoadDownloads();
+        ThemeManager.Apply(Manager.Settings.Theme);
         Manager.DownloadCompleted += item => Dispatcher.BeginInvoke(() => OnDownloadCompleted(item));
         Manager.DownloadFailed += item => Dispatcher.BeginInvoke(() =>
             _tray?.Balloon("Download failed", $"{item.FileName}\n{item.ErrorMessage}", error: true));
         Manager.QueueFinished += () => Dispatcher.BeginInvoke(OnQueueFinished);
+        Manager.PostProcessed += (item, result) => Dispatcher.BeginInvoke(() =>
+        {
+            if (result.ThreatFound)
+                _tray?.Balloon("Virus scan warning", $"{item.FileName}\n{result.Note}", error: true);
+        });
 
         // Escape hatch for VMs / remote sessions where GPU composition leaves WPF windows blank.
         if (Environment.GetEnvironmentVariable("VELODM_SOFTWARE") == "1" || e.Args.Contains("--software-render"))
@@ -62,6 +73,57 @@ public partial class App : Application
         if (url is not null) _main.ShowAddDialog(new BridgeRequest(url));
         // The installer passes this on a first install.
         if (e.Args.Contains("--setup-extension")) Dispatcher.BeginInvoke(_main.ShowBrowserSetup);
+        if (Manager.Settings.CheckForUpdatesOnStartup) _ = CheckForUpdatesAsync(silent: true);
+    }
+
+    private string _dataDirectory = DownloadManager.DefaultDataDirectory;
+
+    public static Version CurrentVersion => typeof(App).Assembly.GetName().Version ?? new Version(0, 0);
+
+    /// <summary>
+    /// Looks for a newer version. A silent check (at startup) only shows a tray notification when
+    /// there is one; a manual check always reports what it found.
+    /// </summary>
+    public async System.Threading.Tasks.Task CheckForUpdatesAsync(bool silent)
+    {
+        var feed = Manager.Settings.UpdateFeedUrl;
+        if (string.IsNullOrWhiteSpace(feed))
+        {
+            if (!silent)
+                MessageBox.Show("No update address is set. Add one in Options → General.", "VeloDM", MessageBoxButton.OK, MessageBoxImage.Information);
+            return;
+        }
+        try
+        {
+            var update = await UpdateChecker.CheckAsync(feed, CurrentVersion, CancellationToken.None);
+            if (update is null)
+            {
+                if (!silent)
+                    MessageBox.Show($"VeloDM {CurrentVersion.ToString(3)} is the latest version.", "VeloDM", MessageBoxButton.OK, MessageBoxImage.Information);
+                return;
+            }
+            if (silent)
+            {
+                _tray?.Balloon($"VeloDM {update.Version.ToString(3)} is available", "Open Help → Check for updates to get it.");
+                return;
+            }
+            var notes = string.IsNullOrWhiteSpace(update.Notes) ? "" : "\n\n" + (update.Notes.Length > 600 ? update.Notes[..600] + "…" : update.Notes);
+            var answer = MessageBox.Show(
+                $"VeloDM {update.Version.ToString(3)} is available (you have {CurrentVersion.ToString(3)}).{notes}\n\n" +
+                (update.InstallerUrl is null ? "Open the download page?" : "Download the installer now?"),
+                "Update available", MessageBoxButton.YesNo, MessageBoxImage.Information);
+            if (answer != MessageBoxResult.Yes) return;
+            if (update.InstallerUrl is not null)
+                _main?.HandleExternalRequest(new BridgeRequest(update.InstallerUrl, Referrer: update.PageUrl, Force: true));
+            else
+                Process.Start(new ProcessStartInfo(update.PageUrl) { UseShellExecute = true });
+        }
+        catch (Exception ex) when (ex is HttpRequestException or TimeoutException or OperationCanceledException or ArgumentException
+                                       or JsonException or System.IO.IOException or System.ComponentModel.Win32Exception)
+        {
+            if (!silent)
+                MessageBox.Show("Could not check for updates: " + ex.Message, "VeloDM", MessageBoxButton.OK, MessageBoxImage.Warning);
+        }
     }
 
     public static bool IsHttpUrl(string? text) =>
@@ -124,7 +186,7 @@ public partial class App : Application
             Dispatcher.BeginInvoke(ShowMain);
             return true;
         }
-        if (!request.Force && !ShouldCapture(request)) return false;
+        if (!request.Force && !request.Stream && !ShouldCapture(request)) return false;
         Dispatcher.BeginInvoke(() => _main?.HandleExternalRequest(request));
         return true;
     }
@@ -138,11 +200,11 @@ public partial class App : Application
         return FileNameHelper.ExtensionForMime(r.Mime) is { } ext && settings.IsCapturedExtension("x" + ext);
     }
 
-    private static void ForwardToRunningInstance(string? url)
+    private void ForwardToRunningInstance(string? url)
     {
         try
         {
-            var port = AppSettings.Load(System.IO.Path.Combine(DownloadManager.DefaultDataDirectory, "settings.json")).BrowserPort;
+            var port = AppSettings.Load(System.IO.Path.Combine(_dataDirectory, "settings.json")).BrowserPort;
             using var client = new HttpClient { Timeout = TimeSpan.FromSeconds(3) };
             using var req = new HttpRequestMessage(HttpMethod.Post, $"http://localhost:{port}/{(url is null ? "show" : "add")}");
             req.Headers.Add(BrowserBridge.AuthHeader, "1");

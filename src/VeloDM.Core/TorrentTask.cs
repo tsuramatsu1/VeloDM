@@ -1,3 +1,4 @@
+using MonoTorrent;
 using MonoTorrent.Client;
 
 namespace VeloDM.Core;
@@ -12,6 +13,9 @@ internal sealed class TorrentTask : IDownloadJob
     private readonly TorrentService _service;
     private readonly CancellationTokenSource _cts = new();
     private long _downloadRate;
+    private bool _selectionApplied;
+    private bool _partial; // some files are deselected
+    private int _appliedLimitKBps;
 
     public DownloadItem Item { get; }
     public Task Completion { get; private set; } = Task.CompletedTask;
@@ -57,13 +61,24 @@ internal sealed class TorrentTask : IDownloadJob
             while (true)
             {
                 ct.ThrowIfCancellationRequested();
+                if (!_selectionApplied && torrent.HasMetadata)
+                {
+                    // A magnet link only learns its file list now.
+                    await TorrentService.ApplyFileSelectionAsync(Item, torrent).ConfigureAwait(false);
+                    _selectionApplied = true;
+                }
+                await ApplySpeedLimitAsync(torrent).ConfigureAwait(false);
                 Mirror(torrent);
 
                 if (torrent.State == TorrentState.Error)
                     throw new IOException(torrent.Error?.Exception?.Message ?? "The torrent stopped with an error.",
                         torrent.Error?.Exception);
 
-                if (torrent.Complete && torrent.State == TorrentState.Seeding)
+                // With deselected files the torrent as a whole never completes; the chosen files do.
+                bool done = torrent.State == TorrentState.Seeding
+                    ? torrent.Complete || _partial
+                    : _partial && torrent.State == TorrentState.Downloading && torrent.PartialProgress >= 100.0;
+                if (done)
                 {
                     if (!Item.IsCompleted)
                     {
@@ -110,6 +125,18 @@ internal sealed class TorrentTask : IDownloadJob
     private static double Ratio(TorrentManager t) =>
         t.Torrent is { Size: > 0 } info ? t.Monitor.DataBytesSent / (double)info.Size : 0;
 
+    private async Task ApplySpeedLimitAsync(TorrentManager t)
+    {
+        int limit = Item.SpeedLimitKBps;
+        if (limit == _appliedLimitKBps) return;
+        var settings = new TorrentSettingsBuilder(t.Settings)
+        {
+            MaximumDownloadRate = (int)Math.Min(int.MaxValue, limit * 1024L),
+        }.ToSettings();
+        await t.UpdateSettingsAsync(settings).ConfigureAwait(false);
+        _appliedLimitKBps = limit;
+    }
+
     private void Mirror(TorrentManager t)
     {
         Item.Phase = t.State switch
@@ -125,9 +152,18 @@ internal sealed class TorrentTask : IDownloadJob
 
         if (t.HasMetadata && t.Torrent is { } info)
         {
-            if (Item.TotalSize != info.Size) Item.TotalSize = info.Size;
+            long wanted = 0, have = 0;
+            foreach (var f in t.Files)
+            {
+                if (f.Priority == Priority.DoNotDownload) continue;
+                wanted += f.Length;
+                have += (long)(f.Length * (f.BitField.PercentComplete / 100.0));
+            }
+            _partial = wanted != info.Size;
+            long total = _partial ? wanted : info.Size;
+            if (Item.TotalSize != total) Item.TotalSize = total;
             if (Item.FileName != info.Name) Item.FileName = info.Name;
-            Item.TorrentBytes = (long)(info.Size * (t.Progress / 100.0));
+            Item.ReceivedBytes = _partial ? have : (long)(info.Size * (t.Progress / 100.0));
             Item.PieceMap = BuildPieceMap(t);
             Item.TorrentFiles = t.Files
                 .Select(f => new TorrentFileState(f.Path, f.Length, f.BitField.PercentComplete, f.Priority.ToString()))

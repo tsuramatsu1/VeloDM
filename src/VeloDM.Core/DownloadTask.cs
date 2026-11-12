@@ -19,6 +19,7 @@ internal sealed class DownloadTask : IDownloadJob
 
     private readonly DownloadManager _manager;
     private readonly CancellationTokenSource _cts = new();
+    private readonly SpeedLimiter _ownLimiter = new();
 
     private long _lastSampleBytes = -1;
     private long _lastSampleTimestamp;
@@ -78,7 +79,9 @@ internal sealed class DownloadTask : IDownloadJob
         }
         catch (Exception ex)
         {
-            Item.ErrorMessage = ex.Message;
+            Item.ErrorMessage = LooksExpired(ex)
+                ? ex.Message + " The link may have expired: right-click the download and choose Refresh download address."
+                : ex.Message;
             Item.Status = DownloadStatus.Error;
         }
         finally
@@ -224,6 +227,12 @@ internal sealed class DownloadTask : IDownloadJob
         }
     }
 
+    /// <summary>A partly downloaded file whose address now answers "forbidden" or "gone": typical of expiring links.</summary>
+    private bool LooksExpired(Exception ex) =>
+        Item.Downloaded > 0
+        && ex is HttpRequestException { StatusCode: HttpStatusCode.Forbidden or HttpStatusCode.NotFound or HttpStatusCode.Gone
+                                                    or HttpStatusCode.Unauthorized };
+
     private static bool IsPermanentHttpError(Exception ex) =>
         ex is HttpRequestException { StatusCode: { } code }
         && (int)code is >= 400 and < 500
@@ -292,6 +301,8 @@ internal sealed class DownloadTask : IDownloadJob
                 lock (seg.Sync) seg.Downloaded += read;
                 seg.LastRunBytes += read;
                 await _manager.Limiter.WaitAsync(read, ct).ConfigureAwait(false);
+                _ownLimiter.Limit = Item.SpeedLimitKBps * 1024L;
+                await _ownLimiter.WaitAsync(read, ct).ConfigureAwait(false);
             }
             seg.State = "Completed";
         }

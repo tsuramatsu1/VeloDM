@@ -71,8 +71,10 @@ public sealed class AppSettings
     /// <summary>Streamed video: the tallest picture to download, 0 = the best available.</summary>
     public int StreamMaxHeight { get; set; }
 
+    public const string DefaultUpdateFeed = "https://github.com/tsuramatsu1/VeloDM";
+
     /// <summary>Where to look for new versions: an update.json address or a GitHub repository address.</summary>
-    public string UpdateFeedUrl { get; set; } = "";
+    public string UpdateFeedUrl { get; set; } = DefaultUpdateFeed;
     public bool CheckForUpdatesOnStartup { get; set; } = true;
 
     public AppTheme Theme { get; set; } = AppTheme.Light;

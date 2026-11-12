@@ -21,10 +21,23 @@ internal sealed partial class TestServer : IDisposable
     public int PeakConnections => Volatile.Read(ref _peak);
     public int ChunkDelayMs { get; set; } = 2;
 
-    public TestServer(int size)
+    /// <summary>Requests whose address contains this text are refused with 403, like an expired link.</summary>
+    public string? ExpiredToken { get; set; }
+
+    public TestServer(int size) : this(RandomBytes(size))
     {
-        Data = new byte[size];
-        new Random(1234).NextBytes(Data);
+    }
+
+    private static byte[] RandomBytes(int size)
+    {
+        var data = new byte[size];
+        new Random(1234).NextBytes(data);
+        return data;
+    }
+
+    public TestServer(byte[] data)
+    {
+        Data = data;
         int port = FreePort();
         BaseUrl = $"http://localhost:{port}/";
         _listener.Prefixes.Add(BaseUrl);
@@ -64,6 +77,11 @@ internal sealed partial class TestServer : IDisposable
         try
         {
             string path = ctx.Request.Url!.AbsolutePath;
+            if (ExpiredToken is { } token && ctx.Request.RawUrl!.Contains(token))
+            {
+                res.StatusCode = 403;
+                return;
+            }
             long from = 0, to = Data.Length - 1;
             res.StatusCode = 200;
 

@@ -4,7 +4,7 @@ namespace VeloDM.Core;
 
 public enum DownloadStatus { Queued, Connecting, Downloading, Paused, Completed, Error }
 
-public enum DownloadKind { Http, Torrent }
+public enum DownloadKind { Http, Torrent, Stream }
 
 public sealed record TorrentFileState(string Path, long Length, double Percent, string Priority);
 
@@ -25,6 +25,8 @@ public sealed class DownloadItem : ObservableObject
     private TimeSpan? _eta;
     private int _activeConnections;
     private string? _phase;
+    private string? _note;
+    private int _speedLimitKBps;
 
     public Guid Id { get; set; } = Guid.NewGuid();
     public DownloadKind Kind { get; set; } = DownloadKind.Http;
@@ -32,8 +34,25 @@ public sealed class DownloadItem : ObservableObject
     /// <summary>Torrents only: lower-case hex info-hash, set once known.</summary>
     public string? InfoHash { get; set; }
 
-    /// <summary>Torrents only: verified bytes on disk (HTTP downloads derive progress from segments).</summary>
-    public long TorrentBytes { get; set; }
+    /// <summary>Torrents and streams: bytes received so far (HTTP downloads derive progress from segments).</summary>
+    [JsonPropertyName("TorrentBytes")] // the name used by downloads.json since 1.1
+    public long ReceivedBytes { get; set; }
+
+    /// <summary>Torrents only: paths (as listed in the torrent) of files the user chose not to download.</summary>
+    public List<string> SkippedFiles { get; set; } = new();
+
+    /// <summary>Streams only: a playlist address (.m3u8 / .mpd) seen on the page, tried if the page itself is not recognised.</summary>
+    public string? ManifestUrl { get; set; }
+
+    /// <summary>Speed cap for this download alone in KB/s; 0 = only the global limit applies.</summary>
+    public int SpeedLimitKBps { get => _speedLimitKBps; set => SetField(ref _speedLimitKBps, Math.Max(0, value)); }
+
+    /// <summary>What happened after the download finished ("Extracted to …", "No threats found").</summary>
+    public string? Note
+    {
+        get => _note;
+        set { if (SetField(ref _note, value)) Notify(nameof(StatusText)); }
+    }
     public string Url { get => _url; set => SetField(ref _url, value); }
     public string? Referrer { get; set; }
     public string? Cookies { get; set; }
@@ -99,6 +118,7 @@ public sealed class DownloadItem : ObservableObject
 
     // Torrent live state, refreshed by the torrent job.
     [JsonIgnore] public bool IsTorrent => Kind == DownloadKind.Torrent;
+    [JsonIgnore] public bool IsStream => Kind == DownloadKind.Stream;
     [JsonIgnore] public double UploadSpeed { get; set; }
     [JsonIgnore] public int Seeds { get; set; }
     [JsonIgnore] public int Peers { get; set; }
@@ -128,7 +148,7 @@ public sealed class DownloadItem : ObservableObject
     {
         get
         {
-            if (IsTorrent) return TorrentBytes;
+            if (Kind != DownloadKind.Http) return ReceivedBytes;
             lock (SegmentsLock)
             {
                 long sum = 0;
@@ -171,6 +191,7 @@ public sealed class DownloadItem : ObservableObject
 
     [JsonIgnore]
     public string ResumeText => IsTorrent ? "Yes (BitTorrent)"
+        : IsStream ? "Yes (finished parts are kept)"
         : ResumeSupported switch { true => "Yes", false => "No", _ => "Unknown" };
 
     [JsonIgnore]
@@ -180,7 +201,7 @@ public sealed class DownloadItem : ObservableObject
         DownloadStatus.Connecting => "Connecting…",
         DownloadStatus.Downloading => string.IsNullOrEmpty(ProgressText) ? "Receiving data…" : ProgressText,
         DownloadStatus.Paused => Downloaded > 0 ? "Paused" : "Stopped",
-        DownloadStatus.Completed => "Complete",
+        DownloadStatus.Completed => string.IsNullOrEmpty(Note) ? "Complete" : "Complete · " + Note,
         DownloadStatus.Error => "Error: " + ErrorMessage,
         _ => Status.ToString()
     };
@@ -209,9 +230,10 @@ public sealed class DownloadItem : ObservableObject
     public void ResetProgress()
     {
         lock (SegmentsLock) Segments.Clear();
-        TorrentBytes = 0;
+        ReceivedBytes = 0;
         PieceMap = null;
         ErrorMessage = null;
+        Note = null;
         NotifyProgress();
     }
 }
