@@ -21,6 +21,7 @@
   <ItemGroup>
     <ProjectReference Include="..\..\src\VeloDM.Core\VeloDM.Core.csproj" />
     <ProjectReference Include="..\FakeYtDlp\FakeYtDlp.csproj" />
+    <ProjectReference Include="..\FakeFfmpeg\FakeFfmpeg.csproj" />
   </ItemGroup>
 
 </Project>

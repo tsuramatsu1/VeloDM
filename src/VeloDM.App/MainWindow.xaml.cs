@@ -124,12 +124,17 @@ public partial class MainWindow : Window
             AddStream(request);
             return;
         }
+        // Picture and sound as two files are joined by FFmpeg, one of the video tools.
+        bool twoFiles = !string.IsNullOrEmpty(request.AudioUrl);
+        if (twoFiles && !VideoToolsWindow.EnsureInstalled(this, _manager)) return;
         var name = !string.IsNullOrWhiteSpace(request.FileName)
             ? FileNameHelper.Sanitize(request.FileName)
             : FileNameHelper.FromUrl(new Uri(request.Url!));
         var category = Categories.ForFileName(name);
         var item = new DownloadItem
         {
+            Kind = twoFiles ? DownloadKind.Stream : DownloadKind.Http,
+            AudioUrl = request.AudioUrl,
             Url = request.Url!,
             Referrer = request.Referrer,
             Cookies = request.Cookies,

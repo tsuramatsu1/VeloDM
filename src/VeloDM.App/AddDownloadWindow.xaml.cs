@@ -217,7 +217,8 @@ public partial class AddDownloadWindow : Window
             if (!_nameEdited) SetName(info.FileName);
             InfoText.Text = $"Size: {(info.Size >= 0 ? Format.Size(info.Size) : "Unknown")}     " +
                             $"Resume / multi-connection: {(info.AcceptRanges ? "Yes" : "No")}" +
-                            (info.ContentType is { } ct ? $"     Type: {ct}" : "");
+                            (info.ContentType is { } ct ? $"     Type: {ct}" : "") +
+                            (HasSeparateSound(source) ? "\nThe sound is a separate file; VeloDM downloads both and joins them into one video." : "");
         }
         catch (OperationCanceledException) when (cts.IsCancellationRequested)
         {
@@ -380,11 +381,18 @@ public partial class AddDownloadWindow : Window
         DialogResult = true;
     }
 
+    /// <summary>The browser sent this address as the picture of a video whose sound is a second file.</summary>
+    private bool HasSeparateSound(string url) =>
+        !string.IsNullOrEmpty(_request?.AudioUrl) && string.Equals(url, _request.Url, StringComparison.Ordinal);
+
     private DownloadItem BuildHttpItem(string url, string folder)
     {
         var name = FileNameHelper.MakeUnique(folder, FileNameHelper.Sanitize(NameBox.Text));
+        bool twoFiles = HasSeparateSound(url);
         return new DownloadItem
         {
+            Kind = twoFiles ? DownloadKind.Stream : DownloadKind.Http,
+            AudioUrl = twoFiles ? _request!.AudioUrl : null,
             Url = url,
             FileName = name,
             SaveDirectory = folder,

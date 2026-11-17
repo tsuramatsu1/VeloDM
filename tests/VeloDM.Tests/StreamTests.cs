@@ -143,7 +143,8 @@ public sealed class StreamTests : IDisposable
         await WaitForEndAsync(broken);
 
         Assert.Equal(DownloadStatus.Error, unsupported.Status);
-        Assert.StartsWith("Unsupported URL", unsupported.ErrorMessage);
+        Assert.StartsWith("The video tools do not know this kind of page.", unsupported.ErrorMessage);
+        Assert.Contains("Unsupported URL: https://unsupported.example/page", unsupported.ErrorMessage);
         Assert.Equal(DownloadStatus.Error, broken.Status);
         Assert.Equal("[generic] This video is unavailable", broken.ErrorMessage);
     }
@@ -223,6 +224,90 @@ public sealed class StreamTests : IDisposable
         Assert.Equal(new VideoInfo("Fake: Title?", "0:19"), info);
         Assert.Null(live.Duration);
         Assert.StartsWith("Unsupported URL", failure.Message);
+    }
+
+    // ---- picture and sound as two files (Facebook stories) ---------------------------------
+
+    private DownloadItem NewPair(TestServer server, string name, string pictureQuery = "", string soundQuery = "")
+    {
+        // The stand-in "ffmpeg.exe" is built next to the tests.
+        _manager.LocateVideoTools = () => new VideoToolPaths(Path.Combine(AppContext.BaseDirectory, "FakeYtDlp.exe"), AppContext.BaseDirectory);
+        var item = NewItem(server.BaseUrl + "file?part=picture" + pictureQuery, name);
+        item.AudioUrl = server.BaseUrl + "file?part=sound" + soundQuery;
+        item.Referrer = "https://www.facebook.com/";
+        return item;
+    }
+
+    [Fact]
+    public async Task Picture_and_sound_files_are_joined_into_one_video()
+    {
+        using var server = new TestServer(40_000);
+        var item = NewPair(server, "story.mp4");
+        long announced = 0;
+        _manager.Ticked += () => { if (item.Status == DownloadStatus.Downloading) announced = Math.Max(announced, item.TotalSize); };
+
+        _manager.Add(item, startNow: true);
+        await WaitForEndAsync(item);
+
+        Assert.True(item.Status == DownloadStatus.Completed, item.ErrorMessage);
+        Assert.Equal("story.mp4", item.FileName);
+        Assert.False(File.Exists(item.TempPath));
+        var args = File.ReadAllLines(item.FullPath);
+        Assert.Equal([item.Url, item.AudioUrl], args.Where((_, i) => i > 0 && args[i - 1] == "-i"));
+        Assert.Equal(2, args.Count(a => a == "https://www.facebook.com/")); // the referrer goes with each input
+        Assert.Equal(["-map", "0", "-map", "1", "-c", "copy", "-f", "mp4"], args[^9..^1]);
+        Assert.Equal(new FileInfo(item.FullPath).Length, item.TotalSize);
+        Assert.True(announced is 0 or 80_000, $"size shown while downloading: {announced}"); // both files together
+        Assert.Equal("No (starts again after a pause)", item.ResumeText);
+    }
+
+    [Fact]
+    public async Task Expired_picture_or_sound_link_fails_with_the_server_answer()
+    {
+        using var server = new TestServer(40_000) { ExpiredToken = "part=sound" };
+        var item = NewPair(server, "expired.mp4");
+
+        _manager.Add(item, startNow: true);
+        await WaitForEndAsync(item);
+
+        Assert.Equal(DownloadStatus.Error, item.Status);
+        Assert.Contains("403", item.ErrorMessage);
+        Assert.False(File.Exists(item.FullPath));
+    }
+
+    [Fact]
+    public async Task Join_failure_reports_what_FFmpeg_said_and_leaves_no_file()
+    {
+        using var server = new TestServer(40_000);
+        var item = NewPair(server, "bad.mp4", soundQuery: "&broken");
+
+        _manager.Add(item, startNow: true);
+        await WaitForEndAsync(item);
+
+        Assert.Equal(DownloadStatus.Error, item.Status);
+        Assert.EndsWith("Server returned 403 Forbidden (access denied)", item.ErrorMessage);
+        Assert.False(File.Exists(item.FullPath));
+        Assert.False(File.Exists(item.TempPath));
+    }
+
+    [Fact]
+    public async Task Pausing_a_join_removes_the_partial_file_and_resuming_starts_again()
+    {
+        using var server = new TestServer(40_000);
+        var item = NewPair(server, "paused.mp4", pictureQuery: "&slow");
+
+        _manager.Add(item, startNow: true);
+        await WaitForAsync(item, i => i.Downloaded > 0);
+        _manager.Pause(item);
+        await WaitForAsync(item, i => i.Status == DownloadStatus.Paused && !_manager.IsRunning(i));
+        Assert.False(File.Exists(item.TempPath));
+        Assert.False(File.Exists(item.FullPath));
+
+        _manager.Start(item);
+        await WaitForEndAsync(item);
+
+        Assert.True(item.Status == DownloadStatus.Completed, item.ErrorMessage);
+        Assert.True(File.Exists(item.FullPath));
     }
 
     [Fact]

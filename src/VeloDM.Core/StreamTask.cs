@@ -100,18 +100,32 @@ internal sealed partial class StreamTask : IDownloadJob
                 Item.SaveDirectory = Categories.FolderFor(_manager.Settings, Item.Category);
             Directory.CreateDirectory(Item.SaveDirectory);
 
-            int exit = await RunToolAsync(tools, Item.Url, isManifest: false, ct).ConfigureAwait(false);
-            // A page yt-dlp has no reader for can still be downloaded from the playlist the browser saw on it.
-            if (exit != 0 && _finalPath is null && !string.IsNullOrWhiteSpace(Item.ManifestUrl)
-                && (_lastError ?? "").Contains("Unsupported URL", StringComparison.OrdinalIgnoreCase))
+            int exit;
+            if (!string.IsNullOrWhiteSpace(Item.AudioUrl))
             {
-                ResetProgress();
-                exit = await RunToolAsync(tools, Item.ManifestUrl!, isManifest: true, ct).ConfigureAwait(false);
+                exit = await JoinPictureAndSoundAsync(tools, ct).ConfigureAwait(false);
+            }
+            else
+            {
+                exit = await RunToolAsync(tools, Item.Url, isManifest: false, ct).ConfigureAwait(false);
+                // A page yt-dlp has no reader for can still be downloaded from the playlist the browser saw on it.
+                if (exit != 0 && _finalPath is null && !string.IsNullOrWhiteSpace(Item.ManifestUrl)
+                    && (_lastError ?? "").Contains("Unsupported URL", StringComparison.OrdinalIgnoreCase))
+                {
+                    ResetProgress();
+                    exit = await RunToolAsync(tools, Item.ManifestUrl!, isManifest: true, ct).ConfigureAwait(false);
+                }
             }
             ct.ThrowIfCancellationRequested();
 
             if (exit != 0 || _finalPath is null || !File.Exists(_finalPath))
-                throw new IOException(_lastError ?? $"The video could not be downloaded (yt-dlp exit code {exit}).");
+            {
+                string message = _lastError ?? $"The video could not be downloaded (exit code {exit}).";
+                if (message.Contains("Unsupported URL", StringComparison.OrdinalIgnoreCase))
+                    message = "The video tools do not know this kind of page. If a Download this video button shows on the " +
+                              "video itself, use that instead. (" + message + ")";
+                throw new IOException(message);
+            }
 
             Item.SaveDirectory = Path.GetDirectoryName(_finalPath)!;
             Item.FileName = Path.GetFileName(_finalPath);
@@ -180,9 +194,18 @@ internal sealed partial class StreamTask : IDownloadJob
 
         Log.Info($"Video: yt-dlp started for {Log.Address(address)}{(isManifest ? " (playlist fallback)" : "")}, " +
                  $"JavaScript runtime: {tools.JsRuntime?.Split(':')[0] ?? "none"}");
+        int exit = await RunProcessAsync(start, OnOutput, OnError, ct).ConfigureAwait(false);
+        Log.Info($"Video: yt-dlp finished with exit code {exit} for {Log.Address(address)}");
+        return exit;
+    }
+
+    /// <summary>Runs a helper program to its end, feeding its output lines to the handlers; cancelling stops it.</summary>
+    private async Task<int> RunProcessAsync(ProcessStartInfo start, Action<string> onOutput, Action<string> onError,
+                                            CancellationToken ct)
+    {
         using var process = new Process { StartInfo = start };
-        process.OutputDataReceived += (_, e) => { if (e.Data is { } line) OnOutput(line); };
-        process.ErrorDataReceived += (_, e) => { if (e.Data is { } line) OnError(line); };
+        process.OutputDataReceived += (_, e) => { if (e.Data is { } line) onOutput(line); };
+        process.ErrorDataReceived += (_, e) => { if (e.Data is { } line) onError(line); };
         process.Start();
         process.BeginOutputReadLine();
         process.BeginErrorReadLine();
@@ -200,8 +223,130 @@ internal sealed partial class StreamTask : IDownloadJob
             throw;
         }
         process.WaitForExit(); // lets the last output lines be delivered
-        Log.Info($"Video: yt-dlp finished with exit code {process.ExitCode} for {Log.Address(address)}");
         return process.ExitCode;
+    }
+
+    // ---- picture and sound as two ordinary files ---------------------------------------------
+
+    private long _joinLastBytes;
+    private long _joinLastStamp;
+
+    /// <summary>
+    /// Some sites (Facebook stories) give the player one file for the picture and one for the
+    /// sound instead of a page yt-dlp can read. FFmpeg fetches both and writes them into one
+    /// .mp4 without re-encoding. It cannot carry on from a partial file, so a pause starts over.
+    /// </summary>
+    private async Task<int> JoinPictureAndSoundAsync(VideoToolPaths tools, CancellationToken ct)
+    {
+        Item.Phase = "Checking the picture and sound files…";
+        string userAgent = string.IsNullOrWhiteSpace(Item.UserAgent) ? _manager.Settings.UserAgent : Item.UserAgent!;
+        string[] inputs = [Item.Url, Item.AudioUrl!];
+
+        // Asking for both first gives the total size, and a clear error if a link has expired.
+        long total = 0;
+        foreach (var address in inputs)
+        {
+            var info = await HttpEngine.ProbeAsync(address, Item.Referrer, null, userAgent, ct).ConfigureAwait(false);
+            total = total < 0 || info.Size <= 0 ? -1 : total + info.Size;
+        }
+        Item.ReceivedBytes = 0;
+        if (total > 0) Item.TotalSize = total;
+        if (string.IsNullOrWhiteSpace(Item.FileName))
+            Item.FileName = FileNameHelper.MakeUnique(Item.SaveDirectory, "video.mp4");
+
+        var temp = Item.TempPath;
+        var start = new ProcessStartInfo(tools.Ffmpeg)
+        {
+            UseShellExecute = false,
+            CreateNoWindow = true,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            StandardOutputEncoding = Encoding.UTF8,
+            StandardErrorEncoding = Encoding.UTF8,
+        };
+        foreach (var argument in new[] { "-hide_banner", "-nostdin", "-y", "-loglevel", "error", "-nostats", "-progress", "pipe:1" })
+            start.ArgumentList.Add(argument);
+        foreach (var address in inputs)
+        {
+            start.ArgumentList.Add("-user_agent");
+            start.ArgumentList.Add(userAgent);
+            if (!string.IsNullOrWhiteSpace(Item.Referrer))
+            {
+                start.ArgumentList.Add("-referer");
+                start.ArgumentList.Add(Item.Referrer!);
+            }
+            start.ArgumentList.Add("-i");
+            start.ArgumentList.Add(address);
+        }
+        // Every track of both files, copied as it is; which of the two holds the picture does not matter.
+        foreach (var argument in new[] { "-map", "0", "-map", "1", "-c", "copy", "-f", "mp4", temp })
+            start.ArgumentList.Add(argument);
+        ApplyToolEnvironment(start, _manager.Settings);
+
+        Log.Info($"Video: FFmpeg joining {Log.Address(Item.Url)} and {Log.Address(Item.AudioUrl)}");
+        _joinLastBytes = 0;
+        _joinLastStamp = Stopwatch.GetTimestamp();
+        int exit;
+        try
+        {
+            exit = await RunProcessAsync(start, OnJoinProgress, OnJoinError, ct).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException)
+        {
+            TryDeleteFile(temp);
+            throw;
+        }
+        Log.Info($"Video: FFmpeg finished with exit code {exit}");
+
+        if (exit == 0 && File.Exists(temp))
+        {
+            var name = FileNameHelper.MakeUnique(Item.SaveDirectory, Item.FileName, ignoreTempFiles: true);
+            _finalPath = Path.Combine(Item.SaveDirectory, name);
+            File.Move(temp, _finalPath);
+        }
+        else
+        {
+            TryDeleteFile(temp);
+        }
+        return exit;
+    }
+
+    // FFmpeg's -progress output: "key=value" lines, repeated about twice a second.
+    private void OnJoinProgress(string line)
+    {
+        if (line.StartsWith("total_size=", StringComparison.Ordinal)
+            && long.TryParse(line.AsSpan(11), NumberStyles.Integer, CultureInfo.InvariantCulture, out long bytes) && bytes >= 0)
+        {
+            long now = Stopwatch.GetTimestamp();
+            double seconds = (now - _joinLastStamp) / (double)Stopwatch.Frequency;
+            if (seconds > 0.2)
+            {
+                double instant = Math.Max(0, bytes - _joinLastBytes) / seconds;
+                _speed = _speed <= 0 ? instant : _speed * 0.6 + instant * 0.4;
+                _joinLastBytes = bytes;
+                _joinLastStamp = now;
+            }
+            Item.ReceivedBytes = Item.TotalSize > 0 ? Math.Min(bytes, Item.TotalSize) : bytes;
+            if (Item.Status == DownloadStatus.Connecting) Item.Status = DownloadStatus.Downloading;
+            Item.Phase = null;
+        }
+        else if (line == "progress=end")
+        {
+            Item.Phase = "Finishing (joining picture and sound)…";
+        }
+    }
+
+    private void OnJoinError(string line)
+    {
+        if (line.Trim().Length == 0) return;
+        _lastError = line.Trim();
+        Log.Warn("Video: FFmpeg: " + line.Trim());
+    }
+
+    private static void TryDeleteFile(string path)
+    {
+        try { File.Delete(path); }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { }
     }
 
     internal static List<string> BuildArguments(DownloadItem item, AppSettings settings, VideoToolPaths tools, string address,
@@ -329,6 +474,7 @@ internal sealed partial class StreamTask : IDownloadJob
     {
         var stem = Path.GetFileNameWithoutExtension(item.FileName);
         if (string.IsNullOrWhiteSpace(stem) || !Directory.Exists(item.SaveDirectory)) return;
+        if (!item.IsCompleted) TryDeleteFile(item.TempPath); // FFmpeg's unfinished output
         try
         {
             foreach (var file in Directory.EnumerateFiles(item.SaveDirectory))

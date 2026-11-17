@@ -7,7 +7,10 @@ namespace VeloDM.Core;
 /// A JavaScript runtime for yt-dlp in its own notation ("deno:C:\…\deno.exe"), or null when none
 /// was found. YouTube needs one; most other sites do not.
 /// </param>
-public sealed record VideoToolPaths(string YtDlp, string FfmpegDirectory, string? JsRuntime = null);
+public sealed record VideoToolPaths(string YtDlp, string FfmpegDirectory, string? JsRuntime = null)
+{
+    public string Ffmpeg => Path.Combine(FfmpegDirectory, "ffmpeg.exe");
+}
 
 /// <summary>
 /// Streamed video (HLS, DASH, YouTube and similar) is downloaded by free helper programs:

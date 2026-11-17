@@ -59,8 +59,11 @@ public partial class ProgressWindow : Window
         DetailNote.Visibility = http || hasFiles ? Visibility.Collapsed : Visibility.Visible;
         DetailNote.Text = torrent
             ? "The list of files appears here once the torrent has started; untick a file to skip it."
-            : "Streamed video is downloaded by yt-dlp. Picture and sound usually arrive as two separate downloads, " +
-              "which FFmpeg then joins into one file.";
+            : !string.IsNullOrEmpty(_item.AudioUrl)
+                ? "Picture and sound are two separate files; FFmpeg fetches both and joins them into one video. " +
+                  "This kind of download cannot be resumed: after a pause it starts again."
+                : "Streamed video is downloaded by yt-dlp. Picture and sound usually arrive as two separate downloads, " +
+                  "which FFmpeg then joins into one file.";
 
         if (torrent)
         {
@@ -146,9 +149,15 @@ public partial class ProgressWindow : Window
     {
         if (File.Exists(_item.FullPath) || Directory.Exists(_item.FullPath))
             Process.Start(new ProcessStartInfo(_item.FullPath) { UseShellExecute = true });
+        Close();
     }
 
-    private void OpenFolder_Click(object sender, RoutedEventArgs e) => MainWindow.OpenFolder(_item);
+    private void OpenFolder_Click(object sender, RoutedEventArgs e)
+    {
+        MainWindow.OpenFolder(_item);
+        // While the download is still running the window stays, so its progress remains in view.
+        if (_item.Status == DownloadStatus.Completed) Close();
+    }
 
     private void Close_Click(object sender, RoutedEventArgs e) => Close();
 }

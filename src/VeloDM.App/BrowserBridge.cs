@@ -20,7 +20,11 @@ public sealed record BridgeRequest(
     // Streamed video: Url is the page showing it, ManifestUrl a playlist the browser saw there.
     bool Stream = false,
     string? ManifestUrl = null,
-    string? Title = null);
+    string? Title = null,
+    // A video whose sound is a second file: Url is the picture, AudioUrl the sound; VeloDM joins them.
+    string? AudioUrl = null,
+    // How the extension found what it is sending; only written to the log.
+    string? Note = null);
 
 /// <summary>
 /// Loopback HTTP endpoint used by the browser extension and by second app instances.
@@ -32,6 +36,9 @@ public sealed record BridgeRequest(
 public sealed class BrowserBridge : IDisposable
 {
     public const string AuthHeader = "X-VeloDM";
+
+    /// <summary>Sent by extensions from 1.5.4 on: the version of the script the browser is really running.</summary>
+    public const string ScriptHeader = "X-VeloDM-Script";
     private const int MaxBodyBytes = 64 * 1024;
 
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
@@ -41,9 +48,10 @@ public sealed class BrowserBridge : IDisposable
 
     /// <summary>
     /// Raised for every request from a browser extension, with the version it reports in the
-    /// <see cref="AuthHeader"/> header (extensions before 1.5.1 send "1").
+    /// <see cref="AuthHeader"/> header (extensions before 1.5.1 send "1") and the value of its
+    /// <see cref="ScriptHeader"/> header, null from extensions before 1.5.4.
     /// </summary>
-    public event Action<string>? ExtensionSeen;
+    public event Action<string, string?>? ExtensionSeen;
 
     public BrowserBridge(int port, Func<BridgeRequest, bool> handler)
     {
@@ -80,7 +88,7 @@ public sealed class BrowserBridge : IDisposable
                 return;
             }
 
-            if (req.Headers["Origin"] is not null) ExtensionSeen?.Invoke(req.Headers[AuthHeader]!);
+            if (req.Headers["Origin"] is not null) ExtensionSeen?.Invoke(req.Headers[AuthHeader]!, req.Headers[ScriptHeader]);
 
             switch (req.HttpMethod, req.Url?.AbsolutePath)
             {
@@ -113,7 +121,8 @@ public sealed class BrowserBridge : IDisposable
                         return;
                     }
                     var manifest = App.IsHttpUrl(payload.ManifestUrl) ? payload.ManifestUrl : null;
-                    bool accepted = _handler(payload with { ShowWindow = false, ManifestUrl = manifest });
+                    var audio = App.IsHttpUrl(payload.AudioUrl) ? payload.AudioUrl : null;
+                    bool accepted = _handler(payload with { ShowWindow = false, ManifestUrl = manifest, AudioUrl = audio });
                     Reply(res, 200, new { ok = true, accepted });
                     break;
 

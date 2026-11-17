@@ -3,12 +3,29 @@
 //   - media served as a plain file (an http/https source): that file is sent to VeloDM;
 //   - X and Facebook: page-hook.js finds the plain .mp4 version of the stream being played;
 //   - any other chunked stream (blob: sources, e.g. YouTube, HLS/DASH players): the page address is
-//     sent and VeloDM downloads the video with its video tools (yt-dlp).
+//     sent and VeloDM downloads the video with its video tools (yt-dlp);
+//   - Facebook stories and feed videos, which have neither a plain file nor a page of their own: the
+//     picture file and the sound file the player fetches are sent, and VeloDM joins them.
 // Copy-protected (DRM) video cannot be downloaded, so no pill is shown for it.
 
 (() => {
-  if (window.__velodmPill) return;
-  window.__velodmPill = true;
+  // A copy of this script left by an earlier load of the extension goes dead when the extension
+  // is updated or reloaded: it can no longer reach the background script. Only a live copy keeps
+  // a new one out, and whatever pill a dead one left on the page is taken away.
+  const alive = () => {
+    try {
+      return !!chrome.runtime.id;
+    } catch {
+      return false;
+    }
+  };
+  if (typeof window.__velodmPillAlive === "function" && window.__velodmPillAlive()) return;
+  window.__velodmPillAlive = alive;
+  for (const el of document.querySelectorAll("div[data-velodm-pill], body > div[style], html > div[style]")) {
+    // Copies before 1.5.5 did not mark their pill: an empty, fixed, top-most div with nothing but a style.
+    const unmarked = !el.firstChild && el.attributes.length === 1 && el.style.position === "fixed" && el.style.zIndex === "2147483647";
+    if (el.hasAttribute("data-velodm-pill") || unmarked) el.remove();
+  }
 
   const MIN_WIDTH = 200;
   const MIN_HEIGHT = 110;
@@ -83,7 +100,13 @@
           try {
             const u = new URL(entry.name);
             if (site === "x" && u.hostname === "video.twimg.com") key = (u.pathname.match(/\/(\d{8,})\//) || [])[1];
-            else if (site === "fb" && u.hostname.endsWith(".fbcdn.net") && u.pathname.endsWith(".mp4")) key = u.pathname;
+            else if (site === "fb" && u.hostname.endsWith(".fbcdn.net")) {
+              fbRequests++;
+              if (isVideoFile(u)) {
+                key = u.pathname;
+                notePlayerFile(u);
+              }
+            }
           } catch {}
           if (key) lastKey = key;
         }
@@ -103,6 +126,73 @@
     // Nothing has been requested yet, so a single known video can only be the one on screen.
     const urls = new Set([...sniffed.values()].map((v) => v.url));
     return site === "fb" && urls.size === 1 ? [...urls][0] : null;
+  }
+
+  // ---- Facebook: the files the player itself fetches ---------------------------------------
+  // Where no plain .mp4 is listed for a video and its page has no address of its own (stories,
+  // videos in the feed), the player still has to fetch the stream: one file for the picture and
+  // one for the sound, a range at a time. Each address describes itself in its "efg" value (kind
+  // and quality, which video it belongs to, how long that is), and without the range it returns
+  // the whole file. VeloDM downloads the two and joins them.
+  const playerFiles = new Map(); // file path -> description, least recently fetched first
+  let playerFileCount = 0;
+  let fbRequests = 0; // everything fetched from Facebook's file servers, for the note in VeloDM's log
+
+  function describedBy(u) {
+    try {
+      return JSON.parse(atob((u.searchParams.get("efg") || "").replace(/-/g, "+").replace(/_/g, "/"))) || {};
+    } catch {
+      return {};
+    }
+  }
+
+  // Video and sound files are named .mp4, are fetched a range at a time, or say what encoding they are.
+  function isVideoFile(u) {
+    if (/\.(jpe?g|png|webp|gif|heic|js|css)$/i.test(u.pathname)) return false;
+    return u.pathname.endsWith(".mp4") || u.searchParams.has("bytestart") || !!describedBy(u).vencode_tag;
+  }
+
+  function notePlayerFile(u) {
+    const info = describedBy(u);
+    const tag = String(info.vencode_tag || "");
+    // Text surgery rather than URL parsing, so the signed address is otherwise left exactly as it was.
+    const [base, query = ""] = u.href.split("#")[0].split("?");
+    const kept = query.split("&").filter((part) => part && !/^(bytestart|byteend)=/.test(part));
+    playerFiles.delete(u.pathname); // re-added below so the map stays ordered by last use
+    playerFiles.set(u.pathname, {
+      url: base + (kept.length ? "?" + kept.join("&") : ""),
+      audio: /audio/i.test(tag),
+      height: Number((tag.match(/(\d{3,4})p/) || [])[1]) || 0,
+      asset: String(info.xpv_asset_id || info.video_id || ""),
+      duration: Number(info.duration_s) || 0,
+      tag,
+      order: ++playerFileCount,
+    });
+    if (playerFiles.size > 300) playerFiles.delete(playerFiles.keys().next().value);
+  }
+
+  // The picture and sound files of the video this element is playing, or null if they cannot be told.
+  function playerFilesFor(el) {
+    if (site !== "fb" || el.tagName !== "VIDEO" || el.mediaKeys || !playerFiles.size) return null;
+    let files = [...playerFiles.values()];
+    // The player fetches the next stories ahead of time; the length tells this video's files from theirs.
+    if (el.duration > 0 && isFinite(el.duration)) {
+      const sameLength = files.filter((f) => f.duration && Math.abs(f.duration - el.duration) <= 1.5);
+      if (sameLength.length) files = sameLength;
+    }
+    const newest = files[files.length - 1];
+    // Files that do not say which video they belong to: only the last few fetched can be this one's.
+    const ofVideo = newest.asset ? files.filter((f) => f.asset === newest.asset) : files.slice(-4);
+    const pictures = ofVideo.filter((f) => !f.audio).sort((a, b) => b.height - a.height || b.order - a.order);
+    if (!pictures.length) return null;
+    // The sound of the same video, or failing that the sound fetched most recently.
+    const sound = [...ofVideo, ...files].filter((f) => f.audio).sort((a, b) => (b.asset === newest.asset) - (a.asset === newest.asset) || b.order - a.order)[0];
+    return {
+      url: pictures[0].url,
+      audioUrl: sound ? sound.url : "",
+      note: `player files: picture "${pictures[0].tag}", sound "${sound ? sound.tag : "none"}", video ${newest.asset || "?"}, ` +
+        `${el.duration > 0 ? Math.round(el.duration) + " s, " : ""}${ofVideo.length} of ${playerFiles.size} files matched`,
+    };
   }
 
   function mediaUrl(el) {
@@ -129,8 +219,58 @@
   }
 
   function downloadable(el) {
-    return !!mediaUrl(el) || isStream(el);
+    return !!mediaUrl(el) || isStream(el) || !!playerFilesFor(el);
   }
+
+  // What to send to VeloDM for this element, or null when nothing about it can be downloaded.
+  // "from" (pill or menu) goes into the note VeloDM writes to its log on Facebook and X.
+  function requestFor(el, from) {
+    const url = mediaUrl(el);
+    if (url) {
+      return { type: "download", url, note: site ? from + ": plain file" : "", referrer: location.href, fileName: fileNameFor(el, url) };
+    }
+    if (isStream(el)) {
+      // Facebook and X page titles describe the site, not the video.
+      return { type: "stream", title: site ? "" : (document.title || "").trim().slice(0, 150), note: site ? from + ": page address" : "" };
+    }
+    const files = playerFilesFor(el);
+    if (!files) return null;
+    return { type: "download", url: files.url, audioUrl: files.audioUrl, note: from + ", " + files.note, referrer: location.href, fileName: fileNameFor(el, files.url) };
+  }
+
+  // Why nothing can be sent, for VeloDM's log: what this page has shown of its videos so far.
+  function whyNothing() {
+    const videos = [...document.querySelectorAll("video")].slice(0, 5).map((v) => {
+      const src = v.currentSrc || v.src || "";
+      return (src ? src.split(":")[0] : v.srcObject ? "object" : "no source") +
+        (isFinite(v.duration) ? " " + Math.round(v.duration) + "s" : "") + (v.paused ? "" : " playing") + (v.mediaKeys ? " protected" : "");
+    });
+    const tags = [...new Set([...playerFiles.values()].slice(-8).map((f) => f.tag || "untagged"))].slice(0, 3);
+    return `no file known for a video here; videos on the page: ${videos.join("; ") || "none"}` +
+      (site === "fb" ? `; file server requests ${fbRequests}, video files ${playerFiles.size}${tags.length ? " (" + tags.join(", ") + ")" : ""}, listed files ${sniffed.size}` : "");
+  }
+
+  // The video a person most likely means on this page: the one with the pill, else the one
+  // playing, else the biggest one in view.
+  function likelyVideo() {
+    if (current && current.isConnected) return current;
+    const area = (v) => {
+      const r = v.getBoundingClientRect();
+      const inView = r.bottom > 0 && r.top < innerHeight && r.right > 0 && r.left < innerWidth;
+      return inView ? r.width * r.height : 0;
+    };
+    return [...document.querySelectorAll("video")]
+      .filter((v) => area(v) > 0)
+      .sort((a, b) => (a.paused - b.paused) || area(b) - area(a))[0] || null;
+  }
+
+  // The background script asks this for "Download the video on this page" in the right-click menu.
+  chrome.runtime.onMessage.addListener((message, _sender, reply) => {
+    if (!message || message.type !== "pick") return false;
+    const el = likelyVideo();
+    reply((el && requestFor(el, "menu")) || { type: "none", note: "menu: " + whyNothing() });
+    return false;
+  });
 
   function fileNameFor(el, url) {
     let ext = "";
@@ -144,6 +284,7 @@
 
   function build() {
     pillHost = document.createElement("div");
+    pillHost.setAttribute("data-velodm-pill", "");
     pillHost.style.cssText = "position:fixed;z-index:2147483647;top:0;left:0;display:none;";
     const root = pillHost.attachShadow({ mode: "closed" });
     root.innerHTML = `
@@ -185,6 +326,13 @@
   }
 
   function place() {
+    if (!alive()) {
+      // The extension was updated or reloaded; a new copy of this script takes over the page.
+      clearInterval(timer);
+      current = null;
+      if (pillHost) pillHost.remove();
+      return;
+    }
     if (!current || !current.isConnected || !downloadable(current)) return hide();
     const r = current.getBoundingClientRect();
     const isAudio = current.tagName === "AUDIO";
@@ -202,24 +350,22 @@
 
   function download() {
     const el = current;
-    if (!el) return;
-    const url = mediaUrl(el);
-    if (!url && !isStream(el)) return;
+    const request = el && requestFor(el, "pill");
+    if (!request) return;
     const original = label.textContent;
-    // Facebook and X page titles describe the site, not the video.
-    const title = site ? "" : (document.title || "").trim().slice(0, 150);
-    chrome.runtime.sendMessage(
-      url
-        ? { type: "download", url, referrer: location.href, fileName: fileNameFor(el, url) }
-        : { type: "stream", title },
-      (reply) => {
-        const ok = !chrome.runtime.lastError && reply && reply.ok;
-        label.textContent = ok ? "Sent to VeloDM" : "VeloDM is not running";
-        setTimeout(() => {
-          if (label) label.textContent = original;
-        }, 2500);
-      },
-    );
+    const show = (text) => {
+      label.textContent = text;
+      setTimeout(() => {
+        if (label) label.textContent = original;
+      }, 2500);
+    };
+    try {
+      chrome.runtime.sendMessage(request, (reply) =>
+        show(!chrome.runtime.lastError && reply && reply.ok ? "Sent to VeloDM" : "VeloDM is not running"));
+    } catch {
+      // The extension was updated or reloaded after this page was opened.
+      show("Reload this page first");
+    }
   }
 
   // Clicking a magnet link hands it straight to VeloDM. If the app is not running, the link is
@@ -230,9 +376,13 @@
     if (!link || !/^magnet:/i.test(link.href)) return;
     e.preventDefault();
     e.stopPropagation();
-    chrome.runtime.sendMessage({ type: "download", url: link.href, referrer: location.href }, (reply) => {
-      if (chrome.runtime.lastError || !reply || !reply.ok) location.href = link.href;
-    });
+    try {
+      chrome.runtime.sendMessage({ type: "download", url: link.href, referrer: location.href }, (reply) => {
+        if (chrome.runtime.lastError || !reply || !reply.ok) location.href = link.href;
+      });
+    } catch {
+      location.href = link.href; // the extension was reloaded after this page was opened
+    }
   }, true);
 
   // Media events do not bubble, so listen in the capture phase.

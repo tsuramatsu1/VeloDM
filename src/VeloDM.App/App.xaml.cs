@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Diagnostics;
 using System.Linq;
 using System.Net.Http;
@@ -187,7 +188,7 @@ public partial class App : Application
         }
     }
 
-    private int _extensionChecked;
+    private readonly HashSet<string> _extensionsSeen = [];
 
     /// <summary>The version of the extension that ships with this copy of VeloDM, or null if it cannot be read.</summary>
     private static Version? BundledExtensionVersion()
@@ -206,20 +207,36 @@ public partial class App : Application
     }
 
     /// <summary>
-    /// A browser keeps running the copy of the extension it loaded, so after VeloDM is upgraded
-    /// the old one stays in use until it is reloaded. Says so once, the first time it calls.
+    /// A browser keeps running the copy of the extension's script it first loaded, even after
+    /// VeloDM is upgraded and the browser restarted. From 1.5.4 the extension notices the newer
+    /// copy and reloads itself; an older one stays until Reload is pressed on the browser's
+    /// extensions page, so the user is told, once per run for each old copy that calls.
     /// </summary>
-    private void OnExtensionSeen(string reported)
+    private void OnExtensionSeen(string reported, string? script)
     {
-        if (Interlocked.Exchange(ref _extensionChecked, 1) == 1) return;
+        lock (_extensionsSeen)
+        {
+            if (!_extensionsSeen.Add(reported + "|" + script)) return;
+        }
         var bundled = BundledExtensionVersion();
-        Version.TryParse(reported, out var running);
-        Log.Info($"Browser extension version: {(running is null ? "older than 1.5.1" : running.ToString())}; this VeloDM ships {bundled}");
-        if (bundled is null || (running is not null && running >= bundled)) return;
-        Dispatcher.BeginInvoke(() => _tray?.Balloon("Reload the VeloDM browser extension",
-            "Your browser is still running an older copy of the extension, so new features are missing. " +
-            "Open the browser's extensions page and press Reload on VeloDM Integration (Help → Install browser extension shows how).",
-            error: true));
+        bool updatesItself = Version.TryParse(script, out var running);
+        if (updatesItself)
+        {
+            Log.Info($"Browser extension: script {running}; this VeloDM ships {bundled}");
+            return; // an older script of this kind is about to reload itself
+        }
+        // Without the script header the version comes from the manifest, which the browser may
+        // have read again since: the script is older than 1.5.4 whatever it says.
+        string says = Version.TryParse(reported, out _) ? reported : "older than 1.5.1";
+        Log.Warn($"Browser extension: an old script is running (it reports {says}, and cannot update itself); this VeloDM ships {bundled}. Reload is needed on the browser's extensions page.");
+        Dispatcher.BeginInvoke(() => OnTop.Ask(null,
+            "One of your browsers is still running an old copy of the VeloDM extension, so recent fixes are missing. " +
+            "For example, the browser's own Save window still opens before VeloDM's.\n\n" +
+            "To update it, in that browser:\n" +
+            "  1. Open the extensions page (type brave://extensions, edge://extensions or chrome://extensions in the address bar).\n" +
+            "  2. On VeloDM Integration, press the Reload button (the round arrow).\n\n" +
+            "This is needed once in each browser. After that the extension updates itself whenever VeloDM is upgraded.",
+            "VeloDM - reload the browser extension", MessageBoxButton.OK, MessageBoxImage.Information));
     }
 
     /// <summary>Called on a thread-pool thread. Returns whether VeloDM takes the download.</summary>
@@ -230,7 +247,9 @@ public partial class App : Application
             Dispatcher.BeginInvoke(ShowMain);
             return true;
         }
-        string what = $"{(request.Stream ? "video on " : "")}{Log.Address(request.Url)} (file \"{request.FileName}\", type \"{request.Mime}\")";
+        string what = $"{(request.Stream ? "video on " : "")}{Log.Address(request.Url)} (file \"{request.FileName}\", type \"{request.Mime}\")" +
+                      (request.AudioUrl is null ? "" : $" with sound from {Log.Address(request.AudioUrl)}") +
+                      (string.IsNullOrWhiteSpace(request.Note) ? "" : $" [{(request.Note.Length > 700 ? request.Note[..700] : request.Note)}]");
         if (!request.Force && !request.Stream && !ShouldCapture(request))
         {
             Log.Info("Browser offered " + what + ": left to the browser (file type is not in the capture list)");

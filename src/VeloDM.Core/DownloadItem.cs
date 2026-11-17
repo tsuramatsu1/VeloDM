@@ -44,6 +44,12 @@ public sealed class DownloadItem : ObservableObject
     /// <summary>Streams only: a playlist address (.m3u8 / .mpd) seen on the page, tried if the page itself is not recognised.</summary>
     public string? ManifestUrl { get; set; }
 
+    /// <summary>
+    /// Streams only: the address of the sound, when a site serves picture (<see cref="Url"/>) and
+    /// sound as two ordinary files. VeloDM then joins the two itself instead of reading a page.
+    /// </summary>
+    public string? AudioUrl { get; set; }
+
     /// <summary>Speed cap for this download alone in KB/s; 0 = only the global limit applies.</summary>
     public int SpeedLimitKBps { get => _speedLimitKBps; set => SetField(ref _speedLimitKBps, Math.Max(0, value)); }
 
@@ -191,7 +197,7 @@ public sealed class DownloadItem : ObservableObject
 
     [JsonIgnore]
     public string ResumeText => IsTorrent ? "Yes (BitTorrent)"
-        : IsStream ? "Yes (finished parts are kept)"
+        : IsStream ? (string.IsNullOrEmpty(AudioUrl) ? "Yes (finished parts are kept)" : "No (starts again after a pause)")
         : ResumeSupported switch { true => "Yes", false => "No", _ => "Unknown" };
 
     [JsonIgnore]

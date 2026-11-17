@@ -100,7 +100,9 @@ which makes HLS and DASH downloads many times faster than one piece at a time.
 Ways to start a video download:
 
 - the **Download this video** pill the browser extension shows on a playing video;
-- right-click a page → **Download the video on this page with VeloDM**;
+- right-click a page → **Download the video on this page with VeloDM**. This sends the same thing
+  a click on the pill would; only when the page shows the extension no video does the page address
+  go to the video tools;
 - **Tasks → Add video from a web page** and paste the page address. Pasting a page address into
   **Add URL** works too: VeloDM notices it is a page, not a file, and switches to video.
 
@@ -199,14 +201,22 @@ directly. On **X (Twitter) and Facebook**, which stream their videos in chunks, 
 for each post also lists ordinary `.mp4` versions; the extension reads that list and offers the
 best-quality one. On every other streaming site (YouTube and the like) the pill sends the page
 address and VeloDM downloads the video with its video tools: see [Streamed video](#streamed-video).
-This is also how **Facebook reels** are downloaded: the pill appears on a reel, a watch page or a
-single post (pages whose address names one video), not in the news feed.
+This is also how **Facebook reels** are downloaded: on a reel, a watch page or a single post
+(pages whose address names one video) the page address goes to the video tools.
+
 No pill is shown on copy-protected (DRM) video. The extension popup has a switch to turn the pill off.
 
-**After upgrading VeloDM, reload the extension.** A browser keeps running the copy of an unpacked
-extension it loaded earlier, so new extension features are missing until you open the extensions
-page and press the reload button on VeloDM Integration (or restart the browser). VeloDM shows a
-notification when the extension that calls it is older than the one it ships.
+**The extension updates itself after a VeloDM upgrade** (from extension 1.5.4). A browser keeps
+running the background script of an unpacked extension it loaded earlier, even after the folder
+has been replaced and the browser restarted. So each time the script starts it compares its own
+version with the one in the folder and, when they differ, reloads the extension. Pages that were
+already open get the new video pill without being reloaded (from extension 1.5.5).
+
+**Coming from an extension older than 1.5.4, reload it once by hand:** open the extensions page
+(`brave://extensions`, `edge://extensions`, `chrome://extensions`) and press the reload button on
+VeloDM Integration, in every browser that has it. Until then that browser misses the newer fixes;
+for example its own Save window still opens before VeloDM's dialog. VeloDM shows a message when a
+copy that cannot update itself calls it.
 
 **Windows in front:** a download started from the browser opens its progress window (or the Add
 dialog) in front of the browser, without taking the keyboard away from the page.
@@ -277,8 +287,7 @@ to their destination as `<name>.vdmpart` until they complete.
 - Streamed video depends on yt-dlp, FFmpeg and Deno, which VeloDM downloads on request but does
   not include. DRM-protected video cannot be downloaded. A video download shows no segment map, and
   a changed speed limit applies to it only after a pause and resume.
-- The video pill on Facebook reels relies on yt-dlp recognising the reel's address; it has not
-  been verified on Facebook itself.
+- Facebook stories cannot be downloaded: the video tools do not read story pages.
 - Magnet links that list only WebTorrent (`wss://`) trackers rely on DHT to find peers.
 - The speed limiter covers HTTP, torrents and video separately: each is held to the limit, so
   together they can use more than the limit.
