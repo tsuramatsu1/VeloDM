@@ -34,9 +34,12 @@
             <MenuItem Header="_Queue">
                 <MenuItem Header="_Start queue" Click="StartQueue_Click" />
                 <MenuItem Header="S_top queue" Click="StopQueue_Click" />
+                <MenuItem Header="Downloads _at once…" Click="QueueConcurrency_Click" />
                 <Separator />
                 <MenuItem Header="_Add selected to queue" Click="AddToQueue_Click" />
                 <MenuItem Header="_Remove selected from queue" Click="RemoveFromQueue_Click" />
+                <MenuItem Header="Move selected _earlier" Click="MoveEarlier_Click" />
+                <MenuItem Header="Move selected _later" Click="MoveLater_Click" />
                 <Separator />
                 <MenuItem Header="Sc_heduler…" Click="Scheduler_Click" />
             </MenuItem>
@@ -174,6 +177,8 @@
                             <Separator />
                             <MenuItem Header="Add to _queue" Click="AddToQueue_Click" />
                             <MenuItem Header="Remove from q_ueue" Click="RemoveFromQueue_Click" />
+                            <MenuItem Header="Move _earlier in queue" Click="MoveEarlier_Click" />
+                            <MenuItem Header="Move _later in queue" Click="MoveLater_Click" />
                             <Separator />
                             <MenuItem Header="_Verify checksum…" Click="Checksum_Click" />
                             <MenuItem Header="E_xtract here" Click="Extract_Click" />
@@ -184,6 +189,26 @@
                         </ContextMenu>
                     </DataGrid.ContextMenu>
                     <DataGrid.Columns>
+                        <DataGridTemplateColumn Header="Queue" Width="60">
+                            <DataGridTemplateColumn.CellTemplate>
+                                <DataTemplate>
+                                    <CheckBox HorizontalAlignment="Center"
+                                              IsChecked="{Binding InQueue, Mode=OneWay}"
+                                              Click="QueueCheckBox_Click"
+                                              ToolTip="Include this download in the queue">
+                                        <CheckBox.Style>
+                                            <Style TargetType="CheckBox">
+                                                <Style.Triggers>
+                                                    <DataTrigger Binding="{Binding IsCompleted}" Value="True">
+                                                        <Setter Property="IsEnabled" Value="False" />
+                                                    </DataTrigger>
+                                                </Style.Triggers>
+                                            </Style>
+                                        </CheckBox.Style>
+                                    </CheckBox>
+                                </DataTemplate>
+                            </DataGridTemplateColumn.CellTemplate>
+                        </DataGridTemplateColumn>
                         <DataGridTemplateColumn Header="File Name" Width="2*" SortMemberPath="FileName">
                             <DataGridTemplateColumn.CellTemplate>
                                 <DataTemplate>

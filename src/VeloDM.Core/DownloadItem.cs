@@ -20,6 +20,7 @@ public sealed class DownloadItem : ObservableObject
     private string? _errorMessage;
     private DateTime? _dateCompleted;
     private bool _inQueue;
+    private int _queueOrder;
     private int _maxConnections = 8;
     private double _speed;
     private TimeSpan? _eta;
@@ -111,6 +112,7 @@ public sealed class DownloadItem : ObservableObject
     public DateTime DateAdded { get; set; } = DateTime.Now;
     public DateTime? DateCompleted { get => _dateCompleted; set => SetField(ref _dateCompleted, value); }
     public bool InQueue { get => _inQueue; set => SetField(ref _inQueue, value); }
+    public int QueueOrder { get => _queueOrder; set => SetField(ref _queueOrder, value); }
     public int MaxConnections { get => _maxConnections; set => SetField(ref _maxConnections, value); }
 
     public List<Segment> Segments { get; set; } = new();

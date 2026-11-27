@@ -21,7 +21,7 @@ Streamed video uses [yt-dlp](https://github.com/yt-dlp/yt-dlp), [FFmpeg](https:/
 | **Dynamic segmentation** | Whenever a connection slot frees up, the segment with the most bytes left is split in half and the new half gets a fresh connection. Fast connections keep taking work from slow ones until the file is done (IDM's core trick). |
 | **Pause / resume** | Segment state is saved to `%LocalAppData%\VeloDM\downloads.json`. Resume re-checks the server and continues only if the size is unchanged and ranges are still supported. |
 | **Robustness** | Per-read 30 s stall timeout, automatic retries with back-off, fewer connections when the server answers 429/503, an immediate stop on permanent 4xx errors, and a single-connection fallback when the server ignores ranges or does not send a size. |
-| **Queue + scheduler** | "Download Later" puts items in the queue. The queue runs N downloads at a time, can start and stop daily at set times, and can exit, sleep or shut down the PC when it finishes. |
+| **Queue + scheduler** | "Download Later" puts items in the queue; use the Queue checkbox beside each download or the Queue sidebar view to manage membership. Reorder entries with **Move selected earlier/later** in the Queue menu or context menu. Choose the simultaneous download limit from **Queue → Downloads at once** (or **Options → Connection**). The queue can start and stop daily at set times, and can exit, sleep or shut down the PC when it finishes. |
 | **Speed limiter** | A global token bucket shared by all connections (Downloads → Speed limiter), plus an optional limit per download (right-click → Speed limit for this download). |
 | **Streamed video** | YouTube and most video sites, HLS and DASH streams: see [Streamed video](#streamed-video). |
 | **Refresh expired links** | Right-click an unfinished download → **Refresh download address**: get a new link for the same file and the download carries on from where it stopped. See [Expired links](#expired-links). |
@@ -190,8 +190,9 @@ VeloDM** always sends the link, whatever its type.
 A captured download first shows the download dialog, with the name and the folder for its type
 already filled in (`Downloads\Compressed`, `Downloads\Video`, `Downloads\Programs` and so on; change
 the base folder in **Options → General**). Choose **New type…** to add a persistent custom type.
-VeloDM remembers the folder you accept for each type and uses it next time. Change the name or
-folder if you like, then choose **Start Download** or **Download Later**. For a video, the dialog
+The **Remember this folder for this type** checkbox controls whether VeloDM uses the folder you
+choose for future downloads of that type. Change the name or folder if you like, then choose
+**Start Download** or **Download Later**. For a video, the dialog
 reads the page and fills in the video's title. To
 start browser downloads straight away without the dialog, turn off **Options → Browser → Show the
 download dialog for downloads from the browser**.

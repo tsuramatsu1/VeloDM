@@ -184,7 +184,12 @@ public sealed class DownloadManager : IDisposable
     /// <summary>Adds a download. Call on the UI thread.</summary>
     public void Add(DownloadItem item, bool startNow)
     {
-        lock (_sync) Items.Add(item);
+        lock (_sync)
+        {
+            if (item.InQueue)
+                item.QueueOrder = Items.Where(i => i.InQueue).Select(i => i.QueueOrder).DefaultIfEmpty(-1).Max() + 1;
+            Items.Add(item);
+        }
         Log.Info($"Added {item.Kind} download \"{item.FileName}\" from {Log.Address(item.Url)} ({(startNow ? "start now" : "later")})");
         if (startNow)
             Start(item);
@@ -391,12 +396,59 @@ public sealed class DownloadManager : IDisposable
 
     public void SetInQueue(DownloadItem item, bool inQueue)
     {
+        bool wasInQueue = item.InQueue;
         item.InQueue = inQueue && !item.IsCompleted;
+        if (item.InQueue && !wasInQueue)
+        {
+            lock (_sync)
+                item.QueueOrder = Items.Where(i => i.InQueue && i.Id != item.Id)
+                    .Select(i => i.QueueOrder).DefaultIfEmpty(-1).Max() + 1;
+        }
         if (item.InQueue && !IsRunning(item) && item.Status is DownloadStatus.Paused or DownloadStatus.Error)
             item.Status = DownloadStatus.Queued;
         else if (!item.InQueue && item.Status == DownloadStatus.Queued)
             item.Status = DownloadStatus.Paused;
         PumpQueue();
+        Save();
+    }
+
+    /// <summary>Moves selected queued downloads one position earlier or later.</summary>
+    public bool MoveInQueue(IReadOnlyCollection<DownloadItem> items, bool earlier)
+    {
+        if (items.Count == 0) return false;
+        var selectedIds = items.Select(i => i.Id).ToHashSet();
+        bool moved = false;
+        lock (_sync)
+        {
+            var queue = Items.Where(i => i.InQueue && !i.IsCompleted)
+                .OrderBy(i => i.QueueOrder).ThenBy(i => i.DateAdded).ToList();
+
+            if (earlier)
+            {
+                for (int i = 1; i < queue.Count; i++)
+                {
+                    if (!selectedIds.Contains(queue[i].Id) || selectedIds.Contains(queue[i - 1].Id)) continue;
+                    (queue[i - 1], queue[i]) = (queue[i], queue[i - 1]);
+                    moved = true;
+                }
+            }
+            else
+            {
+                for (int i = queue.Count - 2; i >= 0; i--)
+                {
+                    if (!selectedIds.Contains(queue[i].Id) || selectedIds.Contains(queue[i + 1].Id)) continue;
+                    (queue[i], queue[i + 1]) = (queue[i + 1], queue[i]);
+                    moved = true;
+                }
+            }
+
+            if (moved)
+                for (int i = 0; i < queue.Count; i++)
+                    queue[i].QueueOrder = i;
+        }
+
+        if (moved) Save();
+        return moved;
     }
 
     public void StartQueue()
@@ -433,10 +485,10 @@ public sealed class DownloadManager : IDisposable
         {
             if (!QueueRunning || _disposed) return;
             int active = _running.Values.Count(j => j.Item.InQueue);
-            foreach (var i in Items)
+            foreach (var i in Items.Where(i => i.InQueue).OrderBy(i => i.QueueOrder).ThenBy(i => i.DateAdded))
             {
                 if (active >= Math.Max(1, Settings.MaxSimultaneousDownloads)) break;
-                if (i.InQueue && i.Status == DownloadStatus.Queued && !_running.ContainsKey(i.Id))
+                if (i.Status == DownloadStatus.Queued && !_running.ContainsKey(i.Id))
                 {
                     toStart.Add(i);
                     active++;

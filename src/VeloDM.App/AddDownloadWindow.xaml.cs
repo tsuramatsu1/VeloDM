@@ -399,15 +399,18 @@ public partial class AddDownloadWindow : Window
             : _isVideo ? BuildStreamItem(source, folder)
             : BuildHttpItem(source, folder);
         if (Result is null) return;
-        try
+        if (RememberFolderBox.IsChecked == true)
         {
-            _manager.RememberCategoryFolder(Result.Category, folder);
-        }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException)
-        {
-            Result = null;
-            Warn("Could not remember this folder: " + ex.Message);
-            return;
+            try
+            {
+                _manager.RememberCategoryFolder(Result.Category, folder);
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException)
+            {
+                Result = null;
+                Warn("Could not remember this folder: " + ex.Message);
+                return;
+            }
         }
         StartNow = startNow;
         DialogResult = true;

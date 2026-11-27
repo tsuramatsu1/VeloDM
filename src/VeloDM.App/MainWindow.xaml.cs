@@ -322,8 +322,25 @@ public partial class MainWindow : Window
         foreach (var item in Selected) _manager.SetInQueue(item, false);
     }
 
+    private void MoveEarlier_Click(object sender, RoutedEventArgs e)
+    {
+        if (_manager.MoveInQueue(Selected, earlier: true)) _view.Refresh();
+    }
+
+    private void MoveLater_Click(object sender, RoutedEventArgs e)
+    {
+        if (_manager.MoveInQueue(Selected, earlier: false)) _view.Refresh();
+    }
+
+    private void QueueCheckBox_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is System.Windows.Controls.CheckBox { DataContext: DownloadItem item, IsChecked: { } isChecked })
+            _manager.SetInQueue(item, isChecked);
+    }
+
     private void StartQueue_Click(object sender, RoutedEventArgs e) => _manager.StartQueue();
     private void StopQueue_Click(object sender, RoutedEventArgs e) => _manager.StopQueue();
+    private void QueueConcurrency_Click(object sender, RoutedEventArgs e) => ShowOptions(1);
 
     private void Open_Click(object sender, RoutedEventArgs e)
     {
@@ -466,6 +483,16 @@ public partial class MainWindow : Window
         if (CategoryList.SelectedItem is SidebarEntry entry)
         {
             _view.Filter = o => entry.Filter((DownloadItem)o);
+            _view.SortDescriptions.Clear();
+            if (entry.Name == "Queue")
+            {
+                _view.SortDescriptions.Add(new SortDescription(nameof(DownloadItem.QueueOrder), ListSortDirection.Ascending));
+                _view.SortDescriptions.Add(new SortDescription(nameof(DownloadItem.DateAdded), ListSortDirection.Ascending));
+            }
+            else
+            {
+                _view.SortDescriptions.Add(new SortDescription(nameof(DownloadItem.DateAdded), ListSortDirection.Descending));
+            }
             UpdateEmptyState();
         }
     }

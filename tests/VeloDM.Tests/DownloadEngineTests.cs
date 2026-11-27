@@ -159,6 +159,31 @@ public sealed class DownloadEngineTests : IDisposable
     }
 
     [Fact]
+    public void Queue_items_can_be_reordered_and_order_is_persisted()
+    {
+        var items = Enumerable.Range(0, 3).Select(i =>
+        {
+            var item = NewItem($"http://example.test/{i}");
+            item.FileName = $"queue-{i}.bin";
+            item.InQueue = true;
+            return item;
+        }).ToArray();
+        foreach (var item in items) _manager.Add(item, startNow: false);
+
+        Assert.True(_manager.MoveInQueue(new[] { items[2] }, earlier: true));
+        Assert.Equal(new[] { items[0], items[2], items[1] },
+            items.OrderBy(i => i.QueueOrder).ToArray());
+
+        Assert.True(_manager.MoveInQueue(new[] { items[2] }, earlier: true));
+        Assert.False(_manager.MoveInQueue(new[] { items[2] }, earlier: true));
+
+        using var reloaded = new DownloadManager(_dir);
+        reloaded.LoadDownloads();
+        Assert.Equal(new[] { "queue-2.bin", "queue-0.bin", "queue-1.bin" },
+            reloaded.Items.Where(i => i.InQueue).OrderBy(i => i.QueueOrder).Select(i => i.FileName));
+    }
+
+    [Fact]
     public async Task Speed_limiter_throttles_throughput()
     {
         var limiter = new SpeedLimiter { Limit = 200 * 1024 };
