@@ -39,6 +39,7 @@ public sealed class DownloadManager : IDisposable
     public event Action<DownloadItem>? DownloadFailed;
     /// <summary>Raised when the after-download steps (virus scan, unpacking) of an item have finished.</summary>
     public event Action<DownloadItem, PostProcessResult>? PostProcessed;
+    public event Action? CategoriesChanged;
 
     /// <summary>Finds yt-dlp and FFmpeg for streamed video; null when they are not installed.</summary>
     public Func<VideoToolPaths?> LocateVideoTools { get; set; }
@@ -114,6 +115,51 @@ public sealed class DownloadManager : IDisposable
         settings.Save(_settingsPath);
         _ = Torrents.ApplySettingsAsync(settings).ContinueWith(t => _ = t.Exception, TaskContinuationOptions.OnlyOnFaulted);
         PumpQueue();
+    }
+
+    public string AddCustomCategory(string name)
+    {
+        name = name.Trim();
+        if (!Categories.IsValidName(name))
+            throw new ArgumentException("Type names must be 1-64 characters and cannot contain path characters or reserved names.", nameof(name));
+
+        var existing = Categories.ForSettings(Settings)
+            .FirstOrDefault(c => c.Name.Equals(name, StringComparison.OrdinalIgnoreCase));
+        if (existing is not null) return existing.Name;
+
+        Settings.CustomCategories.Add(name);
+        try
+        {
+            Settings.Save(_settingsPath);
+        }
+        catch
+        {
+            Settings.CustomCategories.Remove(name);
+            throw;
+        }
+        CategoriesChanged?.Invoke();
+        return name;
+    }
+
+    public void RememberCategoryFolder(string category, string folder)
+    {
+        var name = Categories.ResolveName(Settings, category);
+        var previous = Settings.CategoryFolders.Keys
+            .FirstOrDefault(key => key.Equals(name, StringComparison.OrdinalIgnoreCase));
+        var oldFolder = previous is null ? null : Settings.CategoryFolders[previous];
+        if (previous is not null) Settings.CategoryFolders.Remove(previous);
+        Settings.CategoryFolders[name] = folder;
+
+        try
+        {
+            Settings.Save(_settingsPath);
+        }
+        catch
+        {
+            Settings.CategoryFolders.Remove(name);
+            if (previous is not null) Settings.CategoryFolders[previous] = oldFolder!;
+            throw;
+        }
     }
 
     // ---- download control ---------------------------------------------------------

@@ -23,9 +23,11 @@
             <TextBox x:Name="UrlBox" Grid.Column="1" Grid.ColumnSpan="2" Padding="4" Margin="0,0,0,10"
                      TextChanged="UrlBox_TextChanged" />
 
-            <TextBlock Grid.Row="1" Text="Category" Style="{StaticResource FieldLabel}" />
+            <TextBlock Grid.Row="1" Text="Type" Style="{StaticResource FieldLabel}" />
             <ComboBox x:Name="CategoryBox" Grid.Row="1" Grid.Column="1" Width="180" HorizontalAlignment="Left"
                       Margin="0,0,0,10" SelectionChanged="CategoryBox_SelectionChanged" />
+            <Button Grid.Row="1" Grid.Column="2" Content="New type…" Padding="10,3" Margin="0,0,0,10"
+                    Click="AddCategory_Click" />
 
             <TextBlock Grid.Row="2" Text="Save as" Style="{StaticResource FieldLabel}" />
             <TextBox x:Name="NameBox" Grid.Row="2" Grid.Column="1" Grid.ColumnSpan="2" Padding="4" Margin="0,0,0,10"

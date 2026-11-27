@@ -238,6 +238,22 @@ public sealed class NewFeatureTests : IDisposable
         Assert.False(AppSettings.Load(path).Clone().ShowDialogForBrowserDownloads);
     }
 
+    [Fact]
+    public void Custom_types_and_remembered_folders_persist()
+    {
+        var category = _manager.AddCustomCategory("Emulators");
+        var folder = Path.Combine(_dir, "emulators");
+        _manager.RememberCategoryFolder(category, folder);
+
+        using var reloaded = new DownloadManager(Path.Combine(_dir, "data"));
+
+        Assert.Contains(Categories.ForSettings(reloaded.Settings), c => c.Name == "Emulators");
+        Assert.Equal(folder, Categories.FolderFor(reloaded.Settings, "emulators"));
+        Assert.Equal("Emulators", reloaded.AddCustomCategory("emulators"));
+        Assert.Throws<ArgumentException>(() => reloaded.AddCustomCategory(".."));
+        Assert.Throws<ArgumentException>(() => reloaded.AddCustomCategory("Queue"));
+    }
+
     // ---- checksums -----------------------------------------------------------------------
 
     [Fact]

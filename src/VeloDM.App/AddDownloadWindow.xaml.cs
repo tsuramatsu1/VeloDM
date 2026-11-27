@@ -56,7 +56,7 @@ public partial class AddDownloadWindow : Window
         _debounce.Tick += (_, _) => { _debounce.Stop(); _ = ProbeAsync(); };
 
         _suppress = true;
-        CategoryBox.ItemsSource = Categories.All.Select(c => c.Name).ToList();
+        CategoryBox.ItemsSource = Categories.ForSettings(manager.Settings).Select(c => c.Name).ToList();
         CategoryBox.SelectedItem = Categories.General;
         ConnectionsBox.ItemsSource = ConnectionChoices;
         ConnectionsBox.SelectedItem = ConnectionChoices.Contains(manager.Settings.DefaultConnections)
@@ -328,11 +328,33 @@ public partial class AddDownloadWindow : Window
     {
         if (_suppress || CategoryBox.SelectedItem is not string category) return;
         _categoryEdited = true;
-        if (!_folderEdited)
+        _suppress = true;
+        FolderBox.Text = Categories.FolderFor(_manager.Settings, category);
+        _suppress = false;
+    }
+
+    private void AddCategory_Click(object sender, RoutedEventArgs e)
+    {
+        var dialog = new InputDialog("Add download type", "Enter a name for the new download type.", "") { Owner = this };
+        if (dialog.ShowDialog() != true) return;
+
+        try
         {
+            var category = _manager.AddCustomCategory(dialog.Value);
+            CategoryBox.ItemsSource = Categories.ForSettings(_manager.Settings).Select(c => c.Name).ToList();
             _suppress = true;
-            FolderBox.Text = Categories.FolderFor(_manager.Settings, category);
+            CategoryBox.SelectedItem = category;
+            if (!_folderEdited) FolderBox.Text = Categories.FolderFor(_manager.Settings, category);
             _suppress = false;
+            _categoryEdited = true;
+        }
+        catch (ArgumentException ex)
+        {
+            Warn(ex.Message);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            Warn("Could not save this type: " + ex.Message);
         }
     }
 
@@ -377,6 +399,16 @@ public partial class AddDownloadWindow : Window
             : _isVideo ? BuildStreamItem(source, folder)
             : BuildHttpItem(source, folder);
         if (Result is null) return;
+        try
+        {
+            _manager.RememberCategoryFolder(Result.Category, folder);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException)
+        {
+            Result = null;
+            Warn("Could not remember this folder: " + ex.Message);
+            return;
+        }
         StartNow = startNow;
         DialogResult = true;
     }

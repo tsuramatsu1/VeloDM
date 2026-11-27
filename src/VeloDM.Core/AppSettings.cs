@@ -14,6 +14,8 @@ public sealed class AppSettings
     public string DownloadFolder { get; set; } =
         Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "Downloads");
     public bool UseCategoryFolders { get; set; } = true;
+    public List<string> CustomCategories { get; set; } = [];
+    public Dictionary<string, string> CategoryFolders { get; set; } = [];
 
     public int DefaultConnections { get; set; } = 8;
     public int MaxSimultaneousDownloads { get; set; } = 3;
@@ -110,6 +112,8 @@ public sealed class AppSettings
         {
             if (File.Exists(path) && JsonSerializer.Deserialize<AppSettings>(File.ReadAllText(path), JsonOptions) is { } loaded)
             {
+                loaded.CustomCategories ??= [];
+                loaded.CategoryFolders ??= [];
                 if (loaded.SettingsVersion < CurrentSettingsVersion) loaded.ShowDialogForBrowserDownloads = true;
                 loaded.SettingsVersion = CurrentSettingsVersion;
                 return loaded;

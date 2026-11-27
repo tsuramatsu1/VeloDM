@@ -21,6 +21,7 @@ public partial class MainWindow : Window
     private readonly DownloadManager _manager = App.Manager;
     private readonly ListCollectionView _view;
     private readonly Dictionary<Guid, ProgressWindow> _progressWindows = new();
+    private readonly HashSet<Guid> _showProgressOnCompletion = new();
     private ClipboardMonitor? _clipboard;
     private RefreshAddressWindow? _refreshWindow;
     private bool _closingForExit;
@@ -39,17 +40,8 @@ public partial class MainWindow : Window
         DownloadGrid.ItemsSource = _view;
         ((System.Collections.Specialized.INotifyCollectionChanged)_view).CollectionChanged += (_, _) => UpdateEmptyState();
 
-        var entries = new List<SidebarEntry>
-        {
-            new("All Downloads", "", _ => true),
-        };
-        entries.AddRange(Categories.All.Select(c =>
-            new SidebarEntry(c.Name, c.Glyph, i => i.Category == c.Name, Child: true)));
-        entries.Add(new("Unfinished", "", i => !i.IsCompleted));
-        entries.Add(new("Finished", "", i => i.IsCompleted));
-        entries.Add(new("Queue", "", i => i.InQueue));
-        CategoryList.ItemsSource = entries;
-        CategoryList.SelectedIndex = 0;
+        RefreshCategoryList();
+        _manager.CategoriesChanged += () => Dispatcher.BeginInvoke(RefreshCategoryList);
 
         _manager.Ticked += () => Dispatcher.BeginInvoke(UpdateStatusBar);
         _manager.QueueStateChanged += () => Dispatcher.BeginInvoke(UpdateStatusBar);
@@ -64,6 +56,22 @@ public partial class MainWindow : Window
     }
 
     private void UpdateEmptyState() => EmptyState.Visibility = _view.IsEmpty ? Visibility.Visible : Visibility.Collapsed;
+
+    private void RefreshCategoryList()
+    {
+        var selectedName = (CategoryList.SelectedItem as SidebarEntry)?.Name ?? "All Downloads";
+        var entries = new List<SidebarEntry>
+        {
+            new("All Downloads", "", _ => true),
+        };
+        entries.AddRange(Categories.ForSettings(_manager.Settings).Select(c =>
+            new SidebarEntry(c.Name, c.Glyph, i => i.Category == c.Name, Child: true)));
+        entries.Add(new("Unfinished", "", i => !i.IsCompleted));
+        entries.Add(new("Finished", "", i => i.IsCompleted));
+        entries.Add(new("Queue", "", i => i.InQueue));
+        CategoryList.ItemsSource = entries;
+        CategoryList.SelectedItem = entries.FirstOrDefault(e => e.Name == selectedName) ?? entries[0];
+    }
 
     private List<DownloadItem> Selected => DownloadGrid.SelectedItems.Cast<DownloadItem>().ToList();
 
@@ -202,6 +210,7 @@ public partial class MainWindow : Window
     /// </param>
     private void OpenProgress(DownloadItem item, bool inFront = false)
     {
+        if (!item.IsCompleted) _showProgressOnCompletion.Add(item.Id);
         if (!_progressWindows.TryGetValue(item.Id, out var window))
         {
             window = new ProgressWindow(_manager, item);
@@ -219,7 +228,9 @@ public partial class MainWindow : Window
 
     public void OnDownloadCompleted(DownloadItem item)
     {
+        bool showClosedWindow = _showProgressOnCompletion.Remove(item.Id);
         if (_progressWindows.TryGetValue(item.Id, out var window)) window.Refresh();
+        else if (showClosedWindow) OpenProgress(item);
     }
 
     // ---- commands ---------------------------------------------------------------------

@@ -30,7 +30,7 @@ Streamed video uses [yt-dlp](https://github.com/yt-dlp/yt-dlp), [FFmpeg](https:/
 | **Update check** | Looks for a newer release at startup and from Help → Check for updates. |
 | **Dark theme** | Options → General → Appearance: Light, Dark, or the same as Windows. |
 | **Log file** | `%LocalAppData%\VeloDM\logs\velodm.log` records what VeloDM did and why a download failed (Help → Open log folder). See [Troubleshooting](#troubleshooting). |
-| **Categories** | Compressed, Documents, Music, Programs, Video and General, each saved to its own subfolder of your Downloads folder by default. |
+| **Categories** | Compressed, Documents, Music, Programs, Video and General, each saved to its own subfolder of your Downloads folder by default. Add custom types in the download window; VeloDM remembers each type's selected folder. |
 | **Clipboard monitoring** | Copying a link to a captured file type opens the Add Download dialog. |
 | **Browser integration** | The extension sends downloads, plus cookies, referrer and user agent so logged-in and protected links work, to the app on `localhost:9615`. It also adds "Download with VeloDM" to the right-click menu and a download pill on playing videos. |
 | **BitTorrent** | Magnet links, `.torrent` URLs and local `.torrent` files, with DHT, trackers, peer exchange, local peer discovery and UPnP. Torrents share the same list, queue, scheduler and speed limiter as HTTP downloads. |
@@ -189,8 +189,10 @@ VeloDM** always sends the link, whatever its type.
 
 A captured download first shows the download dialog, with the name and the folder for its type
 already filled in (`Downloads\Compressed`, `Downloads\Video`, `Downloads\Programs` and so on; change
-the base folder in **Options → General**). Change them if you like, then choose **Start Download**
-or **Download Later**. For a video, the dialog reads the page and fills in the video's title. To
+the base folder in **Options → General**). Choose **New type…** to add a persistent custom type.
+VeloDM remembers the folder you accept for each type and uses it next time. Change the name or
+folder if you like, then choose **Start Download** or **Download Later**. For a video, the dialog
+reads the page and fills in the video's title. To
 start browser downloads straight away without the dialog, turn off **Options → Browser → Show the
 download dialog for downloads from the browser**.
 
